@@ -3,7 +3,7 @@ class LanguageUtil {
 
     static let availableLanguages = [
         "auto", "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar",
-        "he", "sv", "it", "id", "hi", "fi", "uk",
+        "he", "sv", "it", "id", "hi", "fi", "uk", "ml",
     ]
 
     static let parakeetV2Languages = ["en"]
@@ -49,6 +49,7 @@ class LanguageUtil {
         "sk": "Slovak",
         "sl": "Slovenian",
         "uk": "Ukrainian",
+        "ml": "Malayalam",
     ]
 
     static func supportedLanguages(engine: String, fluidAudioModelVersion: String) -> [String] {
