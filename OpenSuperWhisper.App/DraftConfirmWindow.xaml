@@ -1,0 +1,35 @@
+<Window x:Class="OpenSuperWhisper.App.DraftConfirmWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="确认识别结果"
+        Width="440"
+        SizeToContent="Height"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <Border Background="{StaticResource PaperBackground}" BorderBrush="{StaticResource PaperAccent}"
+            BorderThickness="1.5" CornerRadius="14" Padding="16,12">
+        <StackPanel>
+            <TextBlock Text="识别结果（可编辑）" FontSize="12" FontFamily="Segoe UI"
+                       Foreground="{StaticResource PaperMuted}" Margin="0,0,0,6"/>
+            <TextBox x:Name="DraftTextBox"
+                     AcceptsReturn="False"
+                     TextWrapping="Wrap"
+                     FontSize="14" FontFamily="Segoe UI"
+                     Foreground="{StaticResource PaperInk}"
+                     Background="{StaticResource PaperSurface}"
+                     BorderBrush="{StaticResource PaperBorder}"
+                     Padding="8,6"
+                     MinHeight="52" MaxHeight="220"
+                     VerticalScrollBarVisibility="Auto"/>
+            <TextBlock Text="回车：确认并打进去　　Esc：取消这次听写"
+                       FontSize="11" FontFamily="Segoe UI"
+                       Foreground="{StaticResource PaperMuted}" Margin="0,8,0,0"/>
+        </StackPanel>
+    </Border>
+</Window>

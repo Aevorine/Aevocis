@@ -63,6 +63,7 @@ public partial class SettingsWindow : Window
     private readonly SettingsStore _settingsStore;
     private readonly Action<int> _applyHotkeyLive;
     private readonly Action<Dictionary<string, int>> _applyAppHotkeysLive;
+    private readonly Action<PushToTalkMode> _applyModeLive;
 
     private bool _capturingHotkey;
     private int _pendingVkCode;
@@ -74,19 +75,28 @@ public partial class SettingsWindow : Window
         AppSettings settings,
         SettingsStore settingsStore,
         Action<int> applyHotkeyLive,
-        Action<Dictionary<string, int>> applyAppHotkeysLive)
+        Action<Dictionary<string, int>> applyAppHotkeysLive,
+        Action<PushToTalkMode> applyModeLive)
     {
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
         _applyHotkeyLive = applyHotkeyLive;
         _applyAppHotkeysLive = applyAppHotkeysLive;
+        _applyModeLive = applyModeLive;
 
         _pendingVkCode = settings.PushToTalkVirtualKeyCode;
         HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
 
         AppPromptsTextBox.Text = FormatAppSpecificPrompts(settings.AppSpecificPrompts);
         AppHotkeysTextBox.Text = FormatAppSpecificHotkeys(settings.AppSpecificHotkeys);
+
+        // F09: default to Hold's radio button unless the saved setting is Toggle.
+        ToggleModeRadioButton.IsChecked = settings.PushToTalkMode == PushToTalkMode.Toggle;
+        HoldModeRadioButton.IsChecked = settings.PushToTalkMode != PushToTalkMode.Toggle;
+
+        // F11
+        ShowDraftBeforeInjectCheckBox.IsChecked = settings.ShowDraftBeforeInject;
 
         LanguageComboBox.ItemsSource = LanguageOptions;
         LanguageComboBox.SelectedItem = LanguageOptions.FirstOrDefault(o => o.Value == settings.Language)
@@ -174,9 +184,12 @@ public partial class SettingsWindow : Window
         _settings.HistoryRetentionDays = ((RetentionOption)HistoryRetentionComboBox.SelectedItem).Days;
         _settings.AppSpecificPrompts = ParseAppSpecificPrompts(AppPromptsTextBox.Text);
         _settings.AppSpecificHotkeys = ParseAppSpecificHotkeys(AppHotkeysTextBox.Text);
+        _settings.PushToTalkMode = ToggleModeRadioButton.IsChecked == true ? PushToTalkMode.Toggle : PushToTalkMode.Hold;
+        _settings.ShowDraftBeforeInject = ShowDraftBeforeInjectCheckBox.IsChecked == true;
         _settingsStore.Save(_settings);
         _applyHotkeyLive(_pendingVkCode);
         _applyAppHotkeysLive(_settings.AppSpecificHotkeys);
+        _applyModeLive(_settings.PushToTalkMode);
         AutoStart.SetEnabled(_settings.AutoStartWithWindows);
         Close();
     }
@@ -240,6 +253,8 @@ public partial class SettingsWindow : Window
             _settingsStore.Save(_settings);
             new TermDictionaryStore().Save(bundle.Terms);
             _applyHotkeyLive(_settings.PushToTalkVirtualKeyCode);
+            _applyAppHotkeysLive(_settings.AppSpecificHotkeys);
+            _applyModeLive(_settings.PushToTalkMode);
             AutoStart.SetEnabled(_settings.AutoStartWithWindows);
             MessageBox.Show(
                 "设置已导入，热键/语言/麦克风等已立即生效。识别模型路径、历史保留期等少数设置需要重启程序才能完全生效。",
@@ -264,6 +279,8 @@ public partial class SettingsWindow : Window
         to.HasSeenOnboarding = from.HasSeenOnboarding;
         to.AppSpecificPrompts = from.AppSpecificPrompts;
         to.AppSpecificHotkeys = from.AppSpecificHotkeys;
+        to.PushToTalkMode = from.PushToTalkMode;
+        to.ShowDraftBeforeInject = from.ShowDraftBeforeInject;
     }
 
     /// <summary>F06 quick-add: appends the tapped preset as a new "进程名|提示词" line, unless

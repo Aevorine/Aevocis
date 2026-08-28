@@ -1,22 +1,40 @@
 using System.Runtime.InteropServices;
 using OpenSuperWhisper.Core;
+using OpenSuperWhisper.Core.Models;
 
 namespace OpenSuperWhisper.Hotkeys;
 
 /// <summary>
-/// System-wide push-to-talk: fires PressStarted on key-down and PressEnded on key-up for one
-/// virtual-key code, regardless of which window has focus. Uses a WH_KEYBOARD_LL hook because
-/// RegisterHotKey only reports the final combo, never key-up separately.
+/// System-wide push-to-talk for one virtual-key code, regardless of which window has focus. Uses
+/// a WH_KEYBOARD_LL hook because RegisterHotKey only reports the final combo, never key-up
+/// separately. Supports two interpretations of the same raw key-down/key-up stream (see
+/// <see cref="PushToTalkMode"/>): Hold (key-down starts, key-up stops - the original behavior)
+/// and Toggle (first key-down starts, next key-down stops; key-up is ignored) - F09.
 ///
 /// F12: also supports per-app overrides (AppSettings.AppSpecificHotkeys) - while a given app is
 /// focused, only its dedicated key (not the global default) arms PressStarted. Empty overrides
 /// (the default) means every key-down is checked against the global key only, identical to
-/// pre-F12 behavior.
+/// pre-F12 behavior. Known limitation where F09 Toggle mode and F12 per-app keys combine: if a
+/// toggle-started recording is still active when the user switches to an app with a *different*
+/// dedicated key, the "stop" tap must be that app's key, not the one that started it - switching
+/// apps mid-toggle-recording can strand it until the right key is found. Rare enough (three
+/// features stacking at once) not to special-case here; SetMode already recovers a stuck session
+/// on an explicit mode change.
 /// </summary>
 public sealed class GlobalPushToTalkHotkey : IHotkeyListener
 {
+    /// <summary>Minimum gap between two toggle-mode key-down transitions we act on. Real
+    /// hardware key-bounce produces extra electrical transitions within a few, up to a few tens
+    /// of, milliseconds of the real one; a human's fastest plausible *intentional* second tap is
+    /// well above that. This sits comfortably between the two so a bounce right after the
+    /// "start" press can't be mistaken for the "stop" press - same spirit as
+    /// DictationController's ~1600-sample (~100ms) accidental-tap guard, just applied at the
+    /// key-edge level instead of after capturing audio. [估计值，未做真实硬件按键去抖动测量]</summary>
+    private const long ToggleDebounceMs = 300;
+
     private uint _vkCode;
     private Dictionary<string, int> _appSpecificVkCodes = new();
+    private PushToTalkMode _mode = PushToTalkMode.Hold;
     private NativeMethods.LowLevelKeyboardProc? _proc;
     private IntPtr _hookId = IntPtr.Zero;
     private bool _isDown;
@@ -28,6 +46,14 @@ public sealed class GlobalPushToTalkHotkey : IHotkeyListener
     /// target that changes between the down and up events would leave _isDown stuck true
     /// forever, silently breaking every future press.</summary>
     private uint? _activeMatchVk;
+
+    /// <summary>Toggle mode only: whether a toggle-started recording is currently "on" (waiting
+    /// for the next accepted key-down to end it).</summary>
+    private bool _toggleActive;
+
+    /// <summary>Toggle mode only: Environment.TickCount64 of the last key-down transition we
+    /// accepted (started or stopped a recording), for the debounce check above.</summary>
+    private long _lastToggleTransitionMs;
 
     public event Action? PressStarted;
     public event Action? PressEnded;
@@ -51,8 +77,16 @@ public sealed class GlobalPushToTalkHotkey : IHotkeyListener
     public void SetVirtualKeyCode(int virtualKeyCode)
     {
         _vkCode = (uint)virtualKeyCode;
+        // A session in progress under the old key must be closed out the same way SetMode does,
+        // not just silently forgotten - otherwise DictationController's _isRecording stays true
+        // forever with no PressEnded ever coming to clear it (Hold: key held down when rebound;
+        // Toggle: a toggle-started recording waiting for its "stop" tap on the now-defunct key).
+        var sessionInProgress = _mode == PushToTalkMode.Hold ? _isDown : _toggleActive;
         _isDown = false;
         _activeMatchVk = null;
+        _toggleActive = false;
+        if (sessionInProgress)
+            PressEnded?.Invoke();
     }
 
     /// <summary>
@@ -64,6 +98,25 @@ public sealed class GlobalPushToTalkHotkey : IHotkeyListener
     public void SetAppSpecificHotkeys(Dictionary<string, int> appSpecificVkCodes)
     {
         _appSpecificVkCodes = appSpecificVkCodes;
+    }
+
+    /// <summary>
+    /// Switches between Hold and Toggle interpretation of the same key, live, without touching
+    /// the hook itself. If a recording is currently in progress under the mode being switched
+    /// away from, its PressEnded is fired now so the switch can't orphan it - under the new
+    /// mode's rules that in-progress session's key-up (Hold -> ignored once we're in Toggle) or
+    /// "next key-down" (Toggle -> read as a fresh Hold press, not a stop) would otherwise never
+    /// arrive to close it out.
+    /// </summary>
+    public void SetMode(PushToTalkMode mode)
+    {
+        if (mode == _mode) return;
+        var sessionInProgress = _mode == PushToTalkMode.Hold ? _isDown : _toggleActive;
+        _mode = mode;
+        _isDown = false;
+        _toggleActive = false;
+        if (sessionInProgress)
+            PressEnded?.Invoke();
     }
 
     /// <summary>Registers the WH_KEYBOARD_LL hook. Returns false - and sets
@@ -109,9 +162,14 @@ public sealed class GlobalPushToTalkHotkey : IHotkeyListener
                 var targetVk = ResolveTargetVkCode();
                 if (data.vkCode == targetVk)
                 {
+                    // !_isDown above already filters Windows' own key-repeat (held key re-fires
+                    // WM_KEYDOWN with the physical key never having gone up) in both modes.
                     _isDown = true;
                     _activeMatchVk = targetVk;
-                    PressStarted?.Invoke();
+                    if (_mode == PushToTalkMode.Hold)
+                        PressStarted?.Invoke();
+                    else
+                        HandleToggleKeyDown();
                 }
             }
             else if ((msg == NativeMethods.WM_KEYUP || msg == NativeMethods.WM_SYSKEYUP)
@@ -119,7 +177,9 @@ public sealed class GlobalPushToTalkHotkey : IHotkeyListener
             {
                 _isDown = false;
                 _activeMatchVk = null;
-                PressEnded?.Invoke();
+                if (_mode == PushToTalkMode.Hold)
+                    PressEnded?.Invoke();
+                // Toggle mode: only key-down transitions carry meaning; key-up is ignored.
             }
         }
         return NativeMethods.CallNextHookEx(_hookId, nCode, wParam, lParam);
@@ -138,6 +198,25 @@ public sealed class GlobalPushToTalkHotkey : IHotkeyListener
                 return (uint)vk;
         }
         return _vkCode;
+    }
+
+    /// <summary>
+    /// Toggle-mode key-down edge: first press starts recording, the next one stops it (no matter
+    /// how long it's held). Debounced (see ToggleDebounceMs) so a key-bounce blip immediately
+    /// after starting can't be misread as the stopping press.
+    /// </summary>
+    private void HandleToggleKeyDown()
+    {
+        var now = Environment.TickCount64;
+        if (now - _lastToggleTransitionMs < ToggleDebounceMs)
+            return; // too soon to be a deliberate separate press - ignore, state unchanged
+        _lastToggleTransitionMs = now;
+
+        _toggleActive = !_toggleActive;
+        if (_toggleActive)
+            PressStarted?.Invoke();
+        else
+            PressEnded?.Invoke();
     }
 
     public void Dispose() => Stop();

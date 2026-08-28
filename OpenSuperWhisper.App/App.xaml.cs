@@ -119,10 +119,12 @@ public partial class App : Application
         ITextInjector injector = new UnicodeTextInjector();
         var pushToTalkHotkey = new GlobalPushToTalkHotkey(settings.PushToTalkVirtualKeyCode);
         pushToTalkHotkey.SetAppSpecificHotkeys(settings.AppSpecificHotkeys); // F12
+        pushToTalkHotkey.SetMode(settings.PushToTalkMode); // F09: apply the saved Hold/Toggle choice
         _pushToTalkHotkey = pushToTalkHotkey;
         IHotkeyListener hotkey = pushToTalkHotkey;
+        IDraftConfirmation draftConfirmation = new DraftConfirmationService(Dispatcher);
 
-        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore);
+        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore, draftConfirmation);
         _mainWindow = new MainWindow(historyStore, settings, ShowSettingsWindow);
         _overlayWindow = new RecordingOverlayWindow();
 
@@ -455,7 +457,8 @@ public partial class App : Application
             _settings!,
             _settingsStore!,
             vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk),
-            appHotkeys => _pushToTalkHotkey!.SetAppSpecificHotkeys(appHotkeys)); // F12
+            appHotkeys => _pushToTalkHotkey!.SetAppSpecificHotkeys(appHotkeys), // F12
+            mode => _pushToTalkHotkey!.SetMode(mode)); // F09
         window.ShowDialog();
     }
 
