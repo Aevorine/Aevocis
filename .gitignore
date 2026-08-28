@@ -14,6 +14,10 @@ obj/
 # Whisper model weights — too large for git history, shipped in the Release zip instead
 OpenSuperWhisper.App/Models/*.bin
 
+# Local packaging output (vpk pack / dotnet publish) — uploaded straight to GitHub Releases,
+# never committed; huge binaries here would bloat history forever.
+release-dist/
+
 # OS cruft
 Thumbs.db
 .DS_Store

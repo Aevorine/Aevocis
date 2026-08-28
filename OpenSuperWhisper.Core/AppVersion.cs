@@ -1,11 +1,12 @@
 namespace OpenSuperWhisper.Core;
 
 /// <summary>
-/// The app's own version number, compared against GitHub releases by the update checker.
-/// Plain string, parsed via <see cref="Version"/> - deliberately not a semver library, since
-/// this app only needs "is the published tag newer than me" and nothing fancier.
+/// The app's own version number. Update-checking itself is handled by Velopack's own
+/// UpdateManager (see App.xaml.cs) - this constant is just for display purposes (crash reports,
+/// diagnostics), so it doesn't need to match Velopack's packVersion exactly, but should be kept
+/// in sync at each release for anyone reading a crash report to make sense of it.
 /// </summary>
 public static class AppVersion
 {
-    public const string Current = "1.0.0";
+    public const string Current = "1.1.0";
 }
