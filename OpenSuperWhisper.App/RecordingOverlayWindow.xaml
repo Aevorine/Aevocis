@@ -18,7 +18,8 @@
             <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource PaperAccent}"
                      Margin="0,0,8,0" VerticalAlignment="Center"/>
             <TextBlock x:Name="StatusText" Text="正在听..." Foreground="{StaticResource PaperInk}"
-                       FontSize="13" FontFamily="Segoe UI" VerticalAlignment="Center"/>
+                       FontSize="13" FontFamily="Segoe UI" VerticalAlignment="Center"
+                       MaxWidth="480" TextWrapping="Wrap"/>
         </StackPanel>
     </Border>
 </Window>
