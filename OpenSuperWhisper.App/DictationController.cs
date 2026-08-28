@@ -13,6 +13,7 @@ public sealed class DictationController : IDisposable
     private readonly IHotkeyListener _hotkey;
     private readonly HistoryStore _history;
     private readonly AppSettings _settings;
+    private readonly TermDictionaryStore _terms;
 
     private bool _isRecording;
     private Task<bool>? _startTask;
@@ -31,7 +32,8 @@ public sealed class DictationController : IDisposable
         ITextInjector injector,
         IHotkeyListener hotkey,
         HistoryStore history,
-        AppSettings settings)
+        AppSettings settings,
+        TermDictionaryStore terms)
     {
         _recorder = recorder;
         _engine = engine;
@@ -39,6 +41,7 @@ public sealed class DictationController : IDisposable
         _hotkey = hotkey;
         _history = history;
         _settings = settings;
+        _terms = terms;
 
         _hotkey.PressStarted += OnPressStarted;
         _hotkey.PressEnded += OnPressEnded;
@@ -128,6 +131,23 @@ public sealed class DictationController : IDisposable
             var text = await _engine.TranscribeAsync(samples, _settings.Language);
             Log.Info($"识别结果：\"{text}\"");
             if (string.IsNullOrWhiteSpace(text) || IsNonSpeechMarker(text)) return;
+
+            var corrections = _terms.Load();
+            if (corrections.Count > 0)
+            {
+                var corrected = TermDictionary.Apply(text, corrections);
+                if (corrected != text)
+                    Log.Info($"专业词汇纠错：\"{text}\" -> \"{corrected}\"");
+                text = corrected;
+            }
+
+            if (_settings.AutocorrectPunctuation)
+            {
+                var fixedText = PunctuationFixer.Apply(text);
+                if (fixedText != text)
+                    Log.Info($"标点自动补全：\"{text}\" -> \"{fixedText}\"");
+                text = fixedText;
+            }
 
             // InjectText throws if the text didn't actually land (SendInput reported fewer
             // events accepted than sent) - history is only saved / TranscriptionCompleted only

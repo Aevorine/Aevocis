@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -20,7 +21,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
+    <!-- F19 开机秒启动: precompiles to native code at publish time so the process doesn't pay
+         JIT cost on first run - only takes effect for a self-contained publish with -r win-x64. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- F26/F27: Velopack needs to run its bootstrap before WPF's own auto-generated Main, so
+         App.xaml.cs supplies a custom Main instead of relying on <ApplicationDefinition>'s
+         auto-generated one (see the ItemGroup below that demotes App.xaml to a plain Page). -->
+    <StartupObject>OpenSuperWhisper.App.App</StartupObject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Include="Models\ggml-small.bin" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />

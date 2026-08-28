@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using OpenSuperWhisper.Audio;
 using OpenSuperWhisper.Core.Models;
 using OpenSuperWhisper.Storage;
@@ -17,12 +19,21 @@ namespace OpenSuperWhisper.App;
 public partial class SettingsWindow : Window
 {
     private sealed record LanguageOption(string Display, string Value);
+    private sealed record RetentionOption(string Display, int Days);
 
     private static readonly LanguageOption[] LanguageOptions =
     {
         new("自动检测", "auto"),
         new("中文", "zh"),
         new("英文", "en"),
+    };
+
+    private static readonly RetentionOption[] RetentionOptions =
+    {
+        new("永久保留", 0),
+        new("保留 7 天", 7),
+        new("保留 30 天", 30),
+        new("保留 90 天", 90),
     };
 
     /// <summary>Id "" is the sentinel for automatic selection (prefer whichever headset/etc.
@@ -36,6 +47,9 @@ public partial class SettingsWindow : Window
 
     private bool _capturingHotkey;
     private int _pendingVkCode;
+    private readonly DispatcherTimer _resourceUsageTimer;
+    private TimeSpan _lastCpuTime;
+    private DateTime _lastCpuSampleAt;
 
     public SettingsWindow(AppSettings settings, SettingsStore settingsStore, Action<int> applyHotkeyLive)
     {
@@ -57,6 +71,42 @@ public partial class SettingsWindow : Window
         MicrophoneComboBox.ItemsSource = micOptions;
         MicrophoneComboBox.SelectedItem = micOptions.FirstOrDefault(o => o.Id == settings.MicrophoneDeviceId)
                                            ?? FollowSystemDefault;
+
+        AutoStartCheckBox.IsChecked = AutoStart.IsEnabled();
+        AutocorrectPunctuationCheckBox.IsChecked = settings.AutocorrectPunctuation;
+
+        HistoryRetentionComboBox.ItemsSource = RetentionOptions;
+        HistoryRetentionComboBox.SelectedItem = RetentionOptions.FirstOrDefault(o => o.Days == settings.HistoryRetentionDays)
+                                                 ?? RetentionOptions[0];
+
+        // F20 内存占用面板: sampled while Settings is open only - no point spending a timer's
+        // worth of wakeups on a window the user isn't looking at.
+        using (var proc = Process.GetCurrentProcess())
+        {
+            _lastCpuTime = proc.TotalProcessorTime;
+        }
+        _lastCpuSampleAt = DateTime.UtcNow;
+        _resourceUsageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _resourceUsageTimer.Tick += (_, _) => UpdateResourceUsage();
+        _resourceUsageTimer.Start();
+        UpdateResourceUsage();
+        Closed += (_, _) => _resourceUsageTimer.Stop();
+    }
+
+    private void UpdateResourceUsage()
+    {
+        using var proc = Process.GetCurrentProcess();
+        var memoryMb = proc.WorkingSet64 / (1024.0 * 1024.0);
+
+        var now = DateTime.UtcNow;
+        var cpuNow = proc.TotalProcessorTime;
+        var wallElapsed = (now - _lastCpuSampleAt).TotalMilliseconds;
+        var cpuElapsed = (cpuNow - _lastCpuTime).TotalMilliseconds;
+        var cpuPercent = wallElapsed > 0 ? (cpuElapsed / wallElapsed / Environment.ProcessorCount) * 100.0 : 0.0;
+        _lastCpuTime = cpuNow;
+        _lastCpuSampleAt = now;
+
+        ResourceUsageTextBlock.Text = $"占用：内存 {memoryMb:F0} MB · CPU {cpuPercent:F1}%";
     }
 
     private void HotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
@@ -92,8 +142,12 @@ public partial class SettingsWindow : Window
         _settings.PushToTalkVirtualKeyCode = _pendingVkCode;
         _settings.Language = ((LanguageOption)LanguageComboBox.SelectedItem).Value;
         _settings.MicrophoneDeviceId = ((MicrophoneDevices.Info)MicrophoneComboBox.SelectedItem).Id;
+        _settings.AutoStartWithWindows = AutoStartCheckBox.IsChecked == true;
+        _settings.AutocorrectPunctuation = AutocorrectPunctuationCheckBox.IsChecked == true;
+        _settings.HistoryRetentionDays = ((RetentionOption)HistoryRetentionComboBox.SelectedItem).Days;
         _settingsStore.Save(_settings);
         _applyHotkeyLive(_pendingVkCode);
+        AutoStart.SetEnabled(_settings.AutoStartWithWindows);
         Close();
     }
 

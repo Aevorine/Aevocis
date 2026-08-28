@@ -47,6 +47,20 @@ public sealed class HistoryStore
         SaveToDisk();
     }
 
+    /// <summary>F23 自动过期: removes records older than <paramref name="retentionDays"/> days
+    /// (measured from now). A non-positive value means "keep forever" and is a no-op - callers
+    /// don't need to special-case the disabled setting themselves. Returns how many were
+    /// removed, purely so the caller can log a meaningful message instead of a fixed string.</summary>
+    public int PurgeOlderThan(int retentionDays)
+    {
+        if (retentionDays <= 0) return 0;
+
+        var cutoff = DateTimeOffset.Now - TimeSpan.FromDays(retentionDays);
+        var removed = _items.RemoveAll(r => r.Timestamp < cutoff);
+        if (removed > 0) SaveToDisk();
+        return removed;
+    }
+
     private List<TranscriptionRecord> LoadFromDisk()
     {
         LastLoadWasReset = false;

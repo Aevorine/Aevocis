@@ -11,11 +11,15 @@ using OpenSuperWhisper.Hotkeys;
 using OpenSuperWhisper.Recognition;
 using OpenSuperWhisper.Storage;
 using OpenSuperWhisper.TextInjection;
+using Velopack;
+using Velopack.Sources;
 
 namespace OpenSuperWhisper.App;
 
 public partial class App : Application
 {
+    private const string GithubRepoUrl = "https://github.com/Aevorine/OpenSuperWhisper_Windows";
+
     private TaskbarIcon? _trayIcon;
     private ContextMenu? _trayMenu;
     private MenuItem? _downloadUpdateItem;
@@ -29,12 +33,37 @@ public partial class App : Application
     private GlobalPushToTalkHotkey? _pushToTalkHotkey;
     private ITranscriptionEngine? _engine;
 
+    // F26/F27: real installer + one-click auto-update, via Velopack. CheckForUpdatesAsync/
+    // DownloadUpdatesAsync are in-process SDK calls; only ApplyUpdatesAndRestart shells out to
+    // the bundled Update.exe. _pendingUpdate holds what CheckForUpdatesAsync found so the tray
+    // menu item click can download+apply it without checking again.
+    private readonly UpdateManager _updateManager = new(new GithubSource(GithubRepoUrl, null, false));
+    private UpdateInfo? _pendingUpdate;
+    private bool _downloadingUpdate;
+
     // Readiness is tracked as two independent gates so a retry doesn't redundantly redo the
     // half that already succeeded (in particular, re-running WhisperFactory.FromPath needlessly
     // would leak the previous factory).
     private bool _engineReady;
     private bool _hotkeyReady;
     private bool IsReady => _engineReady && _hotkeyReady;
+
+    /// <summary>
+    /// Velopack needs to run its own bootstrap (applies a pending update, or handles
+    /// install/uninstall hooks) before anything else in the process - including before WPF's own
+    /// startup - so this app supplies its own Main instead of relying on WPF's auto-generated one
+    /// (see &lt;StartupObject&gt; in the csproj). VelopackApp.Build().Run() is safe to call even
+    /// when not running from a real Velopack install (e.g. `dotnet run` from bin/Debug during
+    /// development) - it just no-ops in that case.
+    /// </summary>
+    [STAThread]
+    private static void Main()
+    {
+        VelopackApp.Build().Run();
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
 
     public App()
     {
@@ -46,13 +75,17 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
     }
 
+    private static readonly System.Diagnostics.Stopwatch StartupStopwatch = System.Diagnostics.Stopwatch.StartNew();
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        Log.Info($"进程启动，t={StartupStopwatch.ElapsedMilliseconds}ms");
 
         var settingsStore = new SettingsStore();
         var historyStore = new HistoryStore();
+        var termsStore = new TermDictionaryStore();
         var settings = settingsStore.Load();
         _settingsStore = settingsStore;
         _settings = settings;
@@ -63,6 +96,10 @@ public partial class App : Application
             settingsStore.Save(settings);
         }
 
+        var purgedCount = historyStore.PurgeOlderThan(settings.HistoryRetentionDays);
+        if (purgedCount > 0)
+            Log.Info($"历史记录自动过期：清理了 {purgedCount} 条超过 {settings.HistoryRetentionDays} 天的记录");
+
         IAudioRecorder recorder = new MicRecorder();
         ITranscriptionEngine engine = new WhisperTranscriptionEngine();
         _engine = engine;
@@ -71,7 +108,7 @@ public partial class App : Application
         _pushToTalkHotkey = pushToTalkHotkey;
         IHotkeyListener hotkey = pushToTalkHotkey;
 
-        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings);
+        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore);
         _mainWindow = new MainWindow(historyStore, settings, ShowSettingsWindow);
         _overlayWindow = new RecordingOverlayWindow();
 
@@ -209,6 +246,7 @@ public partial class App : Application
         }
 
         _trayIcon.ToolTipText = "超语音 - 就绪";
+        Log.Info($"就绪，t={StartupStopwatch.ElapsedMilliseconds}ms（进程启动到可用听写的总耗时）");
 
         // Fire-and-forget, best-effort update check - must never delay or block reaching "就绪"
         // above, and must never surface a failure to the user (see CheckForUpdatesAsync).
@@ -216,27 +254,38 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Checks GitHub's "latest release" API for a newer version than <see cref="AppVersion.Current"/>.
-    /// Silent by design on any failure (network down, GitHub unreachable, malformed response) -
-    /// this app works fully offline, so a failed check is unremarkable and must not interrupt
-    /// anything. When a newer version is found, adds (or refreshes) the "下载新版本" tray menu
-    /// item and shows one balloon tip. <paramref name="manualTrigger"/> additionally shows a
-    /// "已是最新版本" balloon when nothing newer was found, so a manual "检查更新" click from the
-    /// tray menu isn't silently a no-op.
+    /// Checks GitHub Releases (via Velopack's UpdateManager) for a newer version. Silent by
+    /// design on any failure (network down, GitHub unreachable, or - very common during
+    /// development - the app isn't a real Velopack install at all, which throws
+    /// NotInstalledException every single time it's run via `dotnet run`/F5) - this app works
+    /// fully offline, so a failed check is unremarkable and must not interrupt anything. When a
+    /// newer version is found, adds (or refreshes) the "下载新版本" tray menu item and shows one
+    /// balloon tip. <paramref name="manualTrigger"/> additionally shows a "已是最新版本" balloon
+    /// when nothing newer was found, so a manual "检查更新" click from the tray menu isn't
+    /// silently a no-op.
     /// </summary>
     private async Task CheckForUpdatesAsync(bool manualTrigger)
     {
-        var result = await UpdateChecker.CheckAsync();
-        if (result == null) return; // Failure already logged inside UpdateChecker.CheckAsync.
+        UpdateInfo? update;
+        try
+        {
+            update = await _updateManager.CheckForUpdatesAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"更新检查失败：{ex.Message}");
+            return;
+        }
 
-        if (result.IsNewer)
+        _pendingUpdate = update;
+        if (update != null)
         {
             Dispatcher.Invoke(() =>
             {
-                EnsureDownloadUpdateMenuItem(result.LatestVersion, result.ReleaseHtmlUrl);
+                EnsureDownloadUpdateMenuItem(update.TargetFullRelease.Version.ToString());
                 _trayIcon?.ShowBalloonTip(
                     "超语音",
-                    $"发现新版本 v{result.LatestVersion}，点击托盘图标菜单里的「下载新版本」查看",
+                    $"发现新版本 v{update.TargetFullRelease.Version}，点击托盘图标菜单里的「下载新版本」一键更新",
                     BalloonIcon.Info);
             });
         }
@@ -248,38 +297,58 @@ public partial class App : Application
 
     /// <summary>
     /// Inserts the "下载新版本" tray menu item above "显示主界面" the first time a newer version
-    /// is found, or just refreshes its label/target URL on a later check. Never left in the menu
-    /// when no newer version has ever been found.
+    /// is found, or just refreshes its label on a later check. Never left in the menu when no
+    /// newer version has ever been found. Clicking it downloads the update in-process and then
+    /// hands off to Velopack's bundled Update.exe to apply it and restart the app - the user
+    /// never has to leave the tray menu or manually run an installer.
     /// </summary>
-    private void EnsureDownloadUpdateMenuItem(string latestVersion, string releaseHtmlUrl)
+    private void EnsureDownloadUpdateMenuItem(string latestVersion)
     {
         if (_downloadUpdateItem != null)
         {
             _downloadUpdateItem.Header = $"下载新版本 v{latestVersion}";
-            _downloadUpdateItem.Tag = releaseHtmlUrl;
             return;
         }
 
-        var item = new MenuItem { Header = $"下载新版本 v{latestVersion}", Tag = releaseHtmlUrl };
-        item.Click += (_, _) =>
-        {
-            if (item.Tag is not string url) return;
-            try
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                Log.Error("打开发布页面失败", ex);
-            }
-        };
+        var item = new MenuItem { Header = $"下载新版本 v{latestVersion}" };
+        item.Click += (_, _) => _ = DownloadAndApplyUpdateAsync();
         _downloadUpdateItem = item;
         _trayMenu!.Items.Insert(0, item);
+    }
+
+    /// <summary>
+    /// Downloads the pending update and restarts into it. Guarded against double-clicks
+    /// (_downloadingUpdate) since a slow download makes it easy to click the menu item twice.
+    /// Any failure (network drop mid-download, disk full, etc.) is shown to the user rather than
+    /// swallowed - unlike the background CheckForUpdatesAsync, this is a deliberate user action,
+    /// so a silent failure here would look like the click did nothing.
+    /// </summary>
+    private async Task DownloadAndApplyUpdateAsync()
+    {
+        if (_downloadingUpdate || _pendingUpdate is not { } update) return;
+        _downloadingUpdate = true;
+        try
+        {
+            _trayIcon?.ShowBalloonTip("超语音", "正在下载新版本...", BalloonIcon.Info);
+            await _updateManager.DownloadUpdatesAsync(update);
+            _trayIcon?.ShowBalloonTip("超语音", "下载完成，即将重启到新版本", BalloonIcon.Info);
+            _updateManager.ApplyUpdatesAndRestart(update);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("下载或应用更新失败", ex);
+            _trayIcon?.ShowBalloonTip("超语音", $"更新失败：{ex.Message}", BalloonIcon.Error);
+        }
+        finally
+        {
+            _downloadingUpdate = false;
+        }
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log.Error("未处理的 UI 线程异常", e.Exception);
+        CrashReporter.Write(e.Exception, "UI 线程未处理异常");
     }
 
     private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -287,6 +356,8 @@ public partial class App : Application
         Log.Error(
             e.IsTerminating ? "未处理的进程级异常（进程即将终止）" : "未处理的进程级异常",
             e.ExceptionObject as Exception);
+        if (e.ExceptionObject is Exception ex)
+            CrashReporter.Write(ex, e.IsTerminating ? "进程级未处理异常（即将终止）" : "进程级未处理异常");
     }
 
     private void ToggleMainWindow()

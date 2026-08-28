@@ -10,4 +10,8 @@ public sealed class AppSettings
     public int PushToTalkVirtualKeyCode { get; set; } = 0xA3; // VK_RCONTROL
     public bool AutoStartWithWindows { get; set; }
     public bool AutocorrectPunctuation { get; set; } = true;
+    /// <summary>F23: history records older than this many days are purged automatically on
+    /// startup. 0 means "keep forever" - the historical default, so existing users see no
+    /// behavior change until they opt in.</summary>
+    public int HistoryRetentionDays { get; set; } = 0;
 }
