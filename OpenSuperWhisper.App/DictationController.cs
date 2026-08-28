@@ -112,19 +112,21 @@ public sealed class DictationController : IDisposable
         }
         RecordingStopped?.Invoke();
 
-        // Shorter than ~0.1s: treat as an accidental tap, not a real utterance. Logged (not
-        // silent) because this exact shape - "recording looked like it started, nothing was
-        // typed" - is otherwise impossible to tell apart from a real transcription/injection
-        // failure after the fact.
-        if (samples.Length < 1600)
-        {
-            Log.Info($"录音样本过短（{samples.Length} 个采样点），当作误触摸跳过");
-            return;
-        }
+        // Peak amplitude of what was actually captured, logged every time (not just on
+        // failure): "recording looked like it started, nothing was typed" is otherwise
+        // indistinguishable between "the mic captured real speech but Whisper/injection failed"
+        // and "the mic captured near-silence" (wrong/muted input device, volume too low) -
+        // exactly the ambiguity that made this bug take three attempts to actually root-cause.
+        var peak = PeakAmplitude(samples);
+        Log.Info($"录音结束：{samples.Length} 个采样点（约 {samples.Length / 16000.0:F2} 秒），峰值音量 {peak:F3}（0~1，低于约 0.01 基本等于没录到声音）");
+
+        // Shorter than ~0.1s: treat as an accidental tap, not a real utterance.
+        if (samples.Length < 1600) return;
 
         try
         {
             var text = await _engine.TranscribeAsync(samples, _settings.Language);
+            Log.Info($"识别结果：\"{text}\"");
             if (string.IsNullOrWhiteSpace(text) || IsNonSpeechMarker(text)) return;
 
             // InjectText throws if the text didn't actually land (SendInput reported fewer
@@ -154,6 +156,21 @@ public sealed class DictationController : IDisposable
         var t = text.Trim();
         return (t.StartsWith('[') && t.EndsWith(']')) ||
                (t.StartsWith('(') && t.EndsWith(')'));
+    }
+
+    /// <summary>Max absolute sample value, normalized to 0~1. A real spoken utterance at a
+    /// normal distance from the mic typically peaks well above 0.05-0.1; anything under ~0.01
+    /// across the whole recording is effectively silence - the wrong/muted input device, or the
+    /// mic volume turned down, not something Whisper could ever have transcribed.</summary>
+    private static float PeakAmplitude(float[] samples)
+    {
+        float peak = 0f;
+        foreach (var s in samples)
+        {
+            var a = Math.Abs(s);
+            if (a > peak) peak = a;
+        }
+        return peak;
     }
 
     public void Dispose()

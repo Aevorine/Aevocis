@@ -78,7 +78,7 @@ public partial class App : Application
         _trayIcon = new TaskbarIcon
         {
             ToolTipText = "超语音 - 正在加载模型...",
-            Icon = System.Drawing.SystemIcons.Application
+            Icon = new System.Drawing.Icon(Path.Combine(AppContext.BaseDirectory, "app.ico"))
         };
         _trayIcon.TrayLeftMouseUp += (_, _) =>
         {
