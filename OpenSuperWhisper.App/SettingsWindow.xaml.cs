@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using OpenSuperWhisper.Audio;
+using OpenSuperWhisper.Core;
 using OpenSuperWhisper.Core.Models;
 using OpenSuperWhisper.Storage;
 
@@ -42,9 +44,21 @@ public partial class SettingsWindow : Window
     /// the first option.</summary>
     private static readonly MicrophoneDevices.Info FollowSystemDefault = new("", "自动（优先刚连接的耳机等设备）");
 
+    /// <summary>F06: quick-add buttons for the recommended presets from the original ask
+    /// (WeChat/VSCode/Claude Code) - offered in the UI as opt-in suggestions, not written into
+    /// AppSettings' own default, so a fresh install still has an empty AppSpecificPrompts and
+    /// zero behavior change until the user actually clicks one.</summary>
+    private static readonly (string Process, string Prompt)[] PromptPresets =
+    {
+        ("WeChat", "口语化，日常聊天用语，不要太书面"),
+        ("Code", "编程语境，专业术语优先，英文变量名、函数名、类名保持原文不要翻译"),
+        ("Claude", "编程语境，专业术语优先，英文变量名、函数名、类名保持原文不要翻译"),
+    };
+
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
     private readonly Action<int> _applyHotkeyLive;
+    private readonly Action<Dictionary<string, int>> _applyAppHotkeysLive;
 
     private bool _capturingHotkey;
     private int _pendingVkCode;
@@ -52,15 +66,23 @@ public partial class SettingsWindow : Window
     private TimeSpan _lastCpuTime;
     private DateTime _lastCpuSampleAt;
 
-    public SettingsWindow(AppSettings settings, SettingsStore settingsStore, Action<int> applyHotkeyLive)
+    public SettingsWindow(
+        AppSettings settings,
+        SettingsStore settingsStore,
+        Action<int> applyHotkeyLive,
+        Action<Dictionary<string, int>> applyAppHotkeysLive)
     {
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
         _applyHotkeyLive = applyHotkeyLive;
+        _applyAppHotkeysLive = applyAppHotkeysLive;
 
         _pendingVkCode = settings.PushToTalkVirtualKeyCode;
         HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
+
+        AppPromptsTextBox.Text = FormatAppSpecificPrompts(settings.AppSpecificPrompts);
+        AppHotkeysTextBox.Text = FormatAppSpecificHotkeys(settings.AppSpecificHotkeys);
 
         LanguageComboBox.ItemsSource = LanguageOptions;
         LanguageComboBox.SelectedItem = LanguageOptions.FirstOrDefault(o => o.Value == settings.Language)
@@ -146,8 +168,11 @@ public partial class SettingsWindow : Window
         _settings.AutoStartWithWindows = AutoStartCheckBox.IsChecked == true;
         _settings.AutocorrectPunctuation = AutocorrectPunctuationCheckBox.IsChecked == true;
         _settings.HistoryRetentionDays = ((RetentionOption)HistoryRetentionComboBox.SelectedItem).Days;
+        _settings.AppSpecificPrompts = ParseAppSpecificPrompts(AppPromptsTextBox.Text);
+        _settings.AppSpecificHotkeys = ParseAppSpecificHotkeys(AppHotkeysTextBox.Text);
         _settingsStore.Save(_settings);
         _applyHotkeyLive(_pendingVkCode);
+        _applyAppHotkeysLive(_settings.AppSpecificHotkeys);
         AutoStart.SetEnabled(_settings.AutoStartWithWindows);
         Close();
     }
@@ -233,6 +258,24 @@ public partial class SettingsWindow : Window
         to.AutocorrectPunctuation = from.AutocorrectPunctuation;
         to.HistoryRetentionDays = from.HistoryRetentionDays;
         to.HasSeenOnboarding = from.HasSeenOnboarding;
+        to.AppSpecificPrompts = from.AppSpecificPrompts;
+        to.AppSpecificHotkeys = from.AppSpecificHotkeys;
+    }
+
+    /// <summary>F06 quick-add: appends the tapped preset as a new "进程名|提示词" line, unless
+    /// that process name is already present (so repeated clicks don't pile up duplicates).</summary>
+    private void PromptPreset_Click(object sender, RoutedEventArgs e)
+    {
+        var index = int.Parse((string)((Button)sender).Tag);
+        var (process, prompt) = PromptPresets[index];
+
+        var existingLines = AppPromptsTextBox.Text.Split('\n');
+        if (existingLines.Any(l => l.TrimStart().StartsWith(process + "|", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var current = AppPromptsTextBox.Text.TrimEnd('\r', '\n');
+        AppPromptsTextBox.Text = current.Length == 0 ? $"{process}|{prompt}" : $"{current}{Environment.NewLine}{process}|{prompt}";
+        AppPromptsTextBox.CaretIndex = AppPromptsTextBox.Text.Length;
     }
 
     private static string VkToDisplayName(int vk)
@@ -246,5 +289,81 @@ public partial class SettingsWindow : Window
         {
             return $"VK 0x{vk:X2}";
         }
+    }
+
+    /// <summary>Inverse of VkToDisplayName - accepts either a WPF Key name (e.g. "F13",
+    /// case-insensitive) or the "VK 0xNN" hex fallback it produces for keys with no Key enum
+    /// member, so anything the app itself ever displayed round-trips.</summary>
+    private static bool TryParseVkCode(string text, out int vk)
+    {
+        text = text.Trim();
+        if (text.StartsWith("VK 0x", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(text.AsSpan(5), System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out var raw))
+        {
+            vk = raw;
+            return true;
+        }
+        if (Enum.TryParse<Key>(text, ignoreCase: true, out var key) && key != Key.None)
+        {
+            vk = KeyInterop.VirtualKeyFromKey(key);
+            return true;
+        }
+        vk = 0;
+        return false;
+    }
+
+    private static string SingleLine(string s) => s.Replace("\r", " ").Replace("\n", " ");
+
+    private static string FormatAppSpecificPrompts(Dictionary<string, string> map) =>
+        string.Join(Environment.NewLine, map.Select(kv => $"{kv.Key}|{SingleLine(kv.Value)}"));
+
+    private static string FormatAppSpecificHotkeys(Dictionary<string, int> map) =>
+        string.Join(Environment.NewLine, map.Select(kv => $"{kv.Key}|{VkToDisplayName(kv.Value)}"));
+
+    /// <summary>Parses the "进程名|提示词" textbox back into a map. Splits only on the first
+    /// '|' per line, so a prompt is free to contain '|' itself. Lines with no '|', an empty
+    /// process name, or an empty prompt are silently dropped - this is a plain-text convenience
+    /// editor, not a strict format, and a stray blank line shouldn't block Save.</summary>
+    private static Dictionary<string, string> ParseAppSpecificPrompts(string text)
+    {
+        var result = new Dictionary<string, string>();
+        foreach (var rawLine in text.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r').Trim();
+            if (line.Length == 0) continue;
+            var sep = line.IndexOf('|');
+            if (sep <= 0) continue;
+            var processName = line[..sep].Trim();
+            var prompt = line[(sep + 1)..].Trim();
+            if (processName.Length == 0 || prompt.Length == 0) continue;
+            result[processName] = prompt;
+        }
+        return result;
+    }
+
+    /// <summary>Parses the "进程名|按键名" textbox back into a map. A line whose key name
+    /// doesn't parse (typo, unsupported key) is skipped and logged rather than blocking Save -
+    /// consistent with ParseAppSpecificPrompts' leniency.</summary>
+    private static Dictionary<string, int> ParseAppSpecificHotkeys(string text)
+    {
+        var result = new Dictionary<string, int>();
+        foreach (var rawLine in text.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r').Trim();
+            if (line.Length == 0) continue;
+            var sep = line.IndexOf('|');
+            if (sep <= 0) continue;
+            var processName = line[..sep].Trim();
+            var keyText = line[(sep + 1)..].Trim();
+            if (processName.Length == 0 || keyText.Length == 0) continue;
+            if (!TryParseVkCode(keyText, out var vk))
+            {
+                Log.Info($"设置：忽略无法识别的按软件快捷键（{processName}|{keyText}）");
+                continue;
+            }
+            result[processName] = vk;
+        }
+        return result;
     }
 }

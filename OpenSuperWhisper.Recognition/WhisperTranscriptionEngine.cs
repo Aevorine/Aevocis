@@ -18,14 +18,22 @@ public sealed class WhisperTranscriptionEngine : ITranscriptionEngine
         return Task.CompletedTask;
     }
 
-    public async Task<string> TranscribeAsync(float[] samples16kMono, string language, CancellationToken ct = default)
+    public async Task<string> TranscribeAsync(float[] samples16kMono, string language, string? prompt = null, CancellationToken ct = default)
     {
         if (_factory is null)
             throw new InvalidOperationException("识别引擎尚未初始化，先调用 InitializeAsync");
 
-        using var processor = _factory.CreateBuilder()
-            .WithLanguage(string.IsNullOrWhiteSpace(language) ? "auto" : language)
-            .Build();
+        var builder = _factory.CreateBuilder()
+            .WithLanguage(string.IsNullOrWhiteSpace(language) ? "auto" : language);
+
+        // F06: an app-specific prompt (see AppSettings.AppSpecificPrompts) biases recognition
+        // toward that app's preferred style/vocabulary, e.g. keeping English identifiers
+        // untranslated in an editor. WithPrompt (Whisper.net 1.9.1, confirmed via its docs) sets
+        // whisper.cpp's initial-prompt tokens; skipped entirely when there's nothing to add.
+        if (!string.IsNullOrWhiteSpace(prompt))
+            builder = builder.WithPrompt(prompt);
+
+        using var processor = builder.Build();
 
         var sb = new StringBuilder();
         await foreach (var segment in processor.ProcessAsync(samples16kMono))
