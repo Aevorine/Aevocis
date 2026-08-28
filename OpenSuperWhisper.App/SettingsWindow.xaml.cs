@@ -61,6 +61,8 @@ public partial class SettingsWindow : Window
 
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
+    private readonly VoiceCommandStore _voiceCommandStore;
+    private readonly MacroStore _macroStore;
     private readonly Action<int> _applyHotkeyLive;
     private readonly Action<Dictionary<string, int>> _applyAppHotkeysLive;
     private readonly Action<PushToTalkMode> _applyModeLive;
@@ -74,6 +76,8 @@ public partial class SettingsWindow : Window
     public SettingsWindow(
         AppSettings settings,
         SettingsStore settingsStore,
+        VoiceCommandStore voiceCommandStore,
+        MacroStore macroStore,
         Action<int> applyHotkeyLive,
         Action<Dictionary<string, int>> applyAppHotkeysLive,
         Action<PushToTalkMode> applyModeLive)
@@ -81,6 +85,8 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
+        _voiceCommandStore = voiceCommandStore;
+        _macroStore = macroStore;
         _applyHotkeyLive = applyHotkeyLive;
         _applyAppHotkeysLive = applyAppHotkeysLive;
         _applyModeLive = applyModeLive;
@@ -115,6 +121,11 @@ public partial class SettingsWindow : Window
         HistoryRetentionComboBox.ItemsSource = RetentionOptions;
         HistoryRetentionComboBox.SelectedItem = RetentionOptions.FirstOrDefault(o => o.Days == settings.HistoryRetentionDays)
                                                  ?? RetentionOptions[0];
+
+        // F05/F13: plain-text editors, re-loaded fresh every time Settings opens (same reasoning
+        // as the microphone list above - reflect whatever's actually on disk right now).
+        VoiceCommandsTextBox.Text = VoiceCommandTextFormat.Format(voiceCommandStore.Load());
+        MacrosTextBox.Text = VoiceMacroTextFormat.Format(macroStore.Load());
 
         // F20 内存占用面板: sampled while Settings is open only - no point spending a timer's
         // worth of wakeups on a window the user isn't looking at.
@@ -187,6 +198,8 @@ public partial class SettingsWindow : Window
         _settings.PushToTalkMode = ToggleModeRadioButton.IsChecked == true ? PushToTalkMode.Toggle : PushToTalkMode.Hold;
         _settings.ShowDraftBeforeInject = ShowDraftBeforeInjectCheckBox.IsChecked == true;
         _settingsStore.Save(_settings);
+        _voiceCommandStore.Save(VoiceCommandTextFormat.Parse(VoiceCommandsTextBox.Text));
+        _macroStore.Save(VoiceMacroTextFormat.Parse(MacrosTextBox.Text));
         _applyHotkeyLive(_pendingVkCode);
         _applyAppHotkeysLive(_settings.AppSpecificHotkeys);
         _applyModeLive(_settings.PushToTalkMode);

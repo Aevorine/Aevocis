@@ -30,6 +30,8 @@ public partial class App : Application
 
     private SettingsStore? _settingsStore;
     private AppSettings? _settings;
+    private VoiceCommandStore? _voiceCommandStore;
+    private MacroStore? _macroStore;
     private GlobalPushToTalkHotkey? _pushToTalkHotkey;
     private ITranscriptionEngine? _engine;
 
@@ -92,9 +94,13 @@ public partial class App : Application
         var settingsStore = new SettingsStore();
         var historyStore = new HistoryStore();
         var termsStore = new TermDictionaryStore();
+        var voiceCommandStore = new VoiceCommandStore();
+        var macroStore = new MacroStore();
         var settings = settingsStore.Load();
         _settingsStore = settingsStore;
         _settings = settings;
+        _voiceCommandStore = voiceCommandStore;
+        _macroStore = macroStore;
 
         if (string.IsNullOrWhiteSpace(settings.ModelPath) || !File.Exists(settings.ModelPath))
         {
@@ -124,7 +130,7 @@ public partial class App : Application
         IHotkeyListener hotkey = pushToTalkHotkey;
         IDraftConfirmation draftConfirmation = new DraftConfirmationService(Dispatcher);
 
-        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore, draftConfirmation);
+        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore, draftConfirmation, voiceCommandStore, macroStore);
         _mainWindow = new MainWindow(historyStore, settings, ShowSettingsWindow);
         _overlayWindow = new RecordingOverlayWindow();
 
@@ -213,6 +219,21 @@ public partial class App : Application
                 _overlayWindow!.HideOverlay();
                 _trayIcon.ToolTipText = $"超语音 - {reason}";
                 _trayIcon.ShowBalloonTip("超语音", reason, BalloonIcon.Warning);
+            });
+        };
+        // F05/F13: a matched voice command or macro also ends the "正在处理" state shown by the
+        // overlay/tray tooltip, exactly like a normal completed dictation - it's just not a
+        // transcript, so it doesn't touch history. Also restores idle priority (F18), same as a
+        // normal TranscriptionCompleted - a matched command/macro is a "we're done working" event
+        // just like a completed transcription is.
+        _controller.CommandExecuted += _ =>
+        {
+            SetIdlePriority();
+            Dispatcher.Invoke(() =>
+            {
+                _trayIcon.ToolTipText = "超语音 - 就绪";
+                _overlayHideFallbackTimer?.Stop();
+                _overlayWindow!.HideOverlay();
             });
         };
 
@@ -456,6 +477,8 @@ public partial class App : Application
         var window = new SettingsWindow(
             _settings!,
             _settingsStore!,
+            _voiceCommandStore!,
+            _macroStore!,
             vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk),
             appHotkeys => _pushToTalkHotkey!.SetAppSpecificHotkeys(appHotkeys), // F12
             mode => _pushToTalkHotkey!.SetMode(mode)); // F09
