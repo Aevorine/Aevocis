@@ -2,12 +2,18 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="设置"
-        Height="480" Width="420"
+        Height="720" Width="440"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         Background="{StaticResource PaperBackground}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="0,0,4,0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -18,7 +24,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -60,9 +67,36 @@
         <TextBlock Grid.Row="8" Text="语音识别完全在本机进行，不联网、不上传录音或文字到任何服务器。"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
-        <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right">
+        <TextBlock Grid.Row="9" Text="口头命令（说出来直接执行，不会被打出来）：" Foreground="{StaticResource PaperInk}" Margin="0,0,0,4"/>
+        <TextBox x:Name="VoiceCommandsTextBox" Grid.Row="10" Height="90" Margin="0,0,0,4"
+                 AcceptsReturn="True" TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                 FontFamily="Consolas"/>
+        <TextBlock Grid.Row="11" Text="每行一条，格式：动作|触发词，动作可选：取消 / 换行 / 大写后缀（大写后缀命中句尾，转写句尾之前那部分文字为大写后再打出来）。"
+                   Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
+        </Grid>
+        </ScrollViewer>
+
+        <Grid Grid.Row="1" Margin="0,8,4,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="语音宏（说出触发短语，一次执行「切软件+打字」等一串动作）：" Foreground="{StaticResource PaperInk}" Margin="0,0,0,4"/>
+        <TextBox x:Name="MacrosTextBox" Grid.Row="1" Height="90" Margin="0,0,0,4"
+                 AcceptsReturn="True" TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                 FontFamily="Consolas"/>
+        <TextBlock Grid.Row="2" Text="每行一条，格式：触发短语|动作类型:值;动作类型:值...，动作类型可选：打开(程序路径或程序名) / 打字(要打的文字) / 按键(如 Enter)。例：打开微信说早上好|打开:WeChat.exe;打字:早上好"
+                   Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="取消" Width="80" Height="26" Margin="0,0,8,0" Click="CancelButton_Click"/>
             <Button Content="保存" Width="80" Height="26" IsDefault="True" Click="SaveButton_Click"/>
         </StackPanel>
+        </Grid>
     </Grid>
 </Window>

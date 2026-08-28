@@ -41,6 +41,34 @@ public sealed class UnicodeTextInjector : ITextInjector
     }
 
     /// <summary>
+    /// Sends a virtual-key press <paramref name="times"/> times as a single SendInput batch (down
+    /// + up per press) - e.g. VirtualKeys.Enter for F05 "换行", or VirtualKeys.Backspace repeated
+    /// N times to best-effort undo this app's own last injection for F05 "删除这段". Same
+    /// all-or-nothing failure contract as <see cref="InjectText"/>: if SendInput didn't accept
+    /// every event, this throws rather than silently reporting success.
+    /// </summary>
+    public void SendVirtualKey(ushort virtualKeyCode, int times = 1)
+    {
+        if (times <= 0) return;
+
+        var inputs = new List<NativeMethods.INPUT>(times * 2);
+        for (var i = 0; i < times; i++)
+        {
+            inputs.Add(MakeVirtualKeyInput(virtualKeyCode, keyUp: false));
+            inputs.Add(MakeVirtualKeyInput(virtualKeyCode, keyUp: true));
+        }
+
+        var arr = inputs.ToArray();
+        uint sent = NativeMethods.SendInput((uint)arr.Length, arr, Marshal.SizeOf<NativeMethods.INPUT>());
+        if (sent != (uint)arr.Length)
+        {
+            var win32Error = Marshal.GetLastWin32Error();
+            throw new InvalidOperationException(
+                $"SendInput 未能发送全部按键事件（应发送 {arr.Length} 个事件，实际接受 {sent} 个），Win32 错误码 {win32Error}。");
+        }
+    }
+
+    /// <summary>
     /// Strips characters that must never reach an arbitrary focused control unexamined:
     /// C0 control characters (\r, \n, \t, and other codes below 0x20) - a stray newline from a
     /// misheard transcript can submit a form or trigger "send" in whatever currently has focus -
@@ -73,6 +101,31 @@ public sealed class UnicodeTextInjector : ITextInjector
                     wVk = 0,
                     wScan = ch,
                     dwFlags = NativeMethods.KEYEVENTF_UNICODE | (keyUp ? NativeMethods.KEYEVENTF_KEYUP : 0),
+                    time = 0,
+                    dwExtraInfo = IntPtr.Zero
+                }
+            }
+        };
+    }
+
+    /// <summary>
+    /// Same INPUT shape as <see cref="MakeKeyInput"/> but for a real virtual-key code instead of
+    /// a Unicode character: wVk is set (not wScan), and KEYEVENTF_UNICODE is omitted - that flag
+    /// specifically means "this is a synthesized Unicode character, ignore wVk", which is exactly
+    /// the opposite of what a virtual-key press like Enter/Backspace needs.
+    /// </summary>
+    private static NativeMethods.INPUT MakeVirtualKeyInput(ushort vk, bool keyUp)
+    {
+        return new NativeMethods.INPUT
+        {
+            type = NativeMethods.INPUT_KEYBOARD,
+            U = new NativeMethods.InputUnion
+            {
+                ki = new NativeMethods.KEYBDINPUT
+                {
+                    wVk = vk,
+                    wScan = 0,
+                    dwFlags = keyUp ? NativeMethods.KEYEVENTF_KEYUP : 0,
                     time = 0,
                     dwExtraInfo = IntPtr.Zero
                 }

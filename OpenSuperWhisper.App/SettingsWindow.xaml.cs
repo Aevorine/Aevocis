@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using OpenSuperWhisper.Audio;
+using OpenSuperWhisper.Core;
 using OpenSuperWhisper.Core.Models;
 using OpenSuperWhisper.Storage;
 
@@ -43,6 +44,8 @@ public partial class SettingsWindow : Window
 
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
+    private readonly VoiceCommandStore _voiceCommandStore;
+    private readonly MacroStore _macroStore;
     private readonly Action<int> _applyHotkeyLive;
 
     private bool _capturingHotkey;
@@ -51,11 +54,18 @@ public partial class SettingsWindow : Window
     private TimeSpan _lastCpuTime;
     private DateTime _lastCpuSampleAt;
 
-    public SettingsWindow(AppSettings settings, SettingsStore settingsStore, Action<int> applyHotkeyLive)
+    public SettingsWindow(
+        AppSettings settings,
+        SettingsStore settingsStore,
+        VoiceCommandStore voiceCommandStore,
+        MacroStore macroStore,
+        Action<int> applyHotkeyLive)
     {
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
+        _voiceCommandStore = voiceCommandStore;
+        _macroStore = macroStore;
         _applyHotkeyLive = applyHotkeyLive;
 
         _pendingVkCode = settings.PushToTalkVirtualKeyCode;
@@ -78,6 +88,11 @@ public partial class SettingsWindow : Window
         HistoryRetentionComboBox.ItemsSource = RetentionOptions;
         HistoryRetentionComboBox.SelectedItem = RetentionOptions.FirstOrDefault(o => o.Days == settings.HistoryRetentionDays)
                                                  ?? RetentionOptions[0];
+
+        // F05/F13: plain-text editors, re-loaded fresh every time Settings opens (same reasoning
+        // as the microphone list above - reflect whatever's actually on disk right now).
+        VoiceCommandsTextBox.Text = VoiceCommandTextFormat.Format(voiceCommandStore.Load());
+        MacrosTextBox.Text = VoiceMacroTextFormat.Format(macroStore.Load());
 
         // F20 内存占用面板: sampled while Settings is open only - no point spending a timer's
         // worth of wakeups on a window the user isn't looking at.
@@ -146,6 +161,8 @@ public partial class SettingsWindow : Window
         _settings.AutocorrectPunctuation = AutocorrectPunctuationCheckBox.IsChecked == true;
         _settings.HistoryRetentionDays = ((RetentionOption)HistoryRetentionComboBox.SelectedItem).Days;
         _settingsStore.Save(_settings);
+        _voiceCommandStore.Save(VoiceCommandTextFormat.Parse(VoiceCommandsTextBox.Text));
+        _macroStore.Save(VoiceMacroTextFormat.Parse(MacrosTextBox.Text));
         _applyHotkeyLive(_pendingVkCode);
         AutoStart.SetEnabled(_settings.AutoStartWithWindows);
         Close();
