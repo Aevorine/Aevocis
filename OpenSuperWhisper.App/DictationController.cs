@@ -18,6 +18,14 @@ public sealed class DictationController : IDisposable
     private bool _isRecording;
     private Task<bool>? _startTask;
 
+    /// <summary>F01: two-stage ready gate, same pattern as App._engineReady/_hotkeyReady - false
+    /// while a model switch (possibly including a multi-hundred-MB download) is in flight, so a
+    /// press-to-talk during that window is refused up front instead of silently failing after the
+    /// user has already spoken (the engine's own factory-swap lock would otherwise just make
+    /// TranscribeAsync block invisibly until the switch finishes). Defaults to true so behavior is
+    /// unchanged for anyone who never switches models.</summary>
+    public bool TranscriptionEngineReady { get; set; } = true;
+
     public event Action? RecordingStarted;
     public event Action? RecordingStopped;
     public event Action<string>? TranscriptionCompleted;
@@ -61,6 +69,11 @@ public sealed class DictationController : IDisposable
     private void OnPressStarted()
     {
         if (_isRecording) return;
+        if (!TranscriptionEngineReady)
+        {
+            RecordingFailed?.Invoke("识别模型切换中，请稍后再试");
+            return;
+        }
         // Set the guard immediately (synchronously, on the hook thread), not just after Start()
         // succeeds: a second key-down that arrives while the background Start() is still in
         // flight must not race a second concurrent call into MicRecorder. It's reset back to

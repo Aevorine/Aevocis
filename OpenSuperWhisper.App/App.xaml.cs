@@ -32,6 +32,12 @@ public partial class App : Application
     private AppSettings? _settings;
     private GlobalPushToTalkHotkey? _pushToTalkHotkey;
     private ITranscriptionEngine? _engine;
+    private readonly ModelDownloadService _modelDownloader = new();
+    private string _modelsBaseDir = "";
+
+    // F01: guards SwitchModelAsync against overlapping calls (e.g. mashing Save, or Save while a
+    // previous switch's download is still in flight) - only one switch runs at a time.
+    private readonly SemaphoreSlim _modelSwitchLock = new(1, 1);
 
     // F26/F27: real installer + one-click auto-update, via Velopack. CheckForUpdatesAsync/
     // DownloadUpdatesAsync are in-process SDK calls; only ApplyUpdatesAndRestart shells out to
@@ -90,9 +96,25 @@ public partial class App : Application
         _settingsStore = settingsStore;
         _settings = settings;
 
-        if (string.IsNullOrWhiteSpace(settings.ModelPath) || !File.Exists(settings.ModelPath))
+        // F01: resolve the on-disk path for whatever model the user has selected (ModelSize
+        // defaults to "small", so existing settings.json files with no ModelSize field at all
+        // behave exactly as before). If a previously-selected downloaded model's file has gone
+        // missing (user deleted it, settings.json copied to a new machine, etc.), fall back to
+        // the always-present bundled Small model for *this session* rather than silently kicking
+        // off a multi-hundred-MB download before the tray icon even exists - ModelSize itself is
+        // left untouched so Settings still shows their actual preference and a save from there
+        // re-triggers the download.
+        _modelsBaseDir = Path.Combine(AppContext.BaseDirectory, "Models");
+        var startupModel = ModelCatalog.Resolve(settings.ModelSize);
+        var startupModelPath = ModelCatalog.GetLocalPath(startupModel, _modelsBaseDir);
+        if (!startupModel.Bundled && !File.Exists(startupModelPath))
         {
-            settings.ModelPath = Path.Combine(AppContext.BaseDirectory, "Models", "ggml-small.bin");
+            Log.Info($"已选择的模型 {startupModel.Key} 本地文件不存在（{startupModelPath}），本次启动临时使用小模型，可在设置里重新选择以触发下载");
+            startupModelPath = ModelCatalog.GetLocalPath(ModelCatalog.Small, _modelsBaseDir);
+        }
+        if (settings.ModelPath != startupModelPath)
+        {
+            settings.ModelPath = startupModelPath;
             settingsStore.Save(settings);
         }
 
@@ -375,8 +397,56 @@ public partial class App : Application
 
     private void ShowSettingsWindow()
     {
-        var window = new SettingsWindow(_settings!, _settingsStore!, vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk));
+        var window = new SettingsWindow(_settings!, _settingsStore!, vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk), SwitchModelAsync);
         window.ShowDialog();
+    }
+
+    /// <summary>
+    /// F01/F08: switches the running app to <paramref name="option"/> without a restart - downloads
+    /// it first if it isn't cached locally yet (no-op if it already is), reinitializes the shared
+    /// WhisperTranscriptionEngine in place (old model's memory is freed, not leaked - see
+    /// WhisperTranscriptionEngine.InitializeAsync), and only then persists the choice to
+    /// settings.json (so a failed/cancelled switch never leaves settings pointing at a model that
+    /// isn't actually loaded). While in flight, DictationController.TranscriptionEngineReady is
+    /// false so a press-to-talk started mid-switch is refused immediately rather than silently
+    /// waiting on the engine's internal lock. Returns (success, errorMessage) instead of throwing -
+    /// SettingsWindow shows errorMessage to the user and leaves the window open to retry.
+    /// </summary>
+    private async Task<(bool Success, string? ErrorMessage)> SwitchModelAsync(
+        ModelOption option, IProgress<ModelDownloadProgress>? progress)
+    {
+        await _modelSwitchLock.WaitAsync();
+        try
+        {
+            if (_settings!.ModelSize == option.Key && File.Exists(_settings.ModelPath))
+                return (true, null); // already the active model - nothing to do
+
+            _controller!.TranscriptionEngineReady = false;
+            try
+            {
+                var path = await _modelDownloader.EnsureLocalAsync(option, _modelsBaseDir, progress);
+                await _engine!.InitializeAsync(path);
+
+                _settings.ModelSize = option.Key;
+                _settings.ModelPath = path;
+                _settingsStore!.Save(_settings);
+                Log.Info($"识别模型已切换为 {option.Key}（{path}），无需重启");
+                return (true, null);
+            }
+            finally
+            {
+                _controller.TranscriptionEngineReady = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"切换识别模型到 {option.Key} 失败", ex);
+            return (false, ex.Message);
+        }
+        finally
+        {
+            _modelSwitchLock.Release();
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

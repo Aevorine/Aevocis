@@ -2,13 +2,15 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="设置"
-        Height="480" Width="420"
+        Height="560" Width="420"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="{StaticResource PaperBackground}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -42,27 +44,36 @@
                       DisplayMemberPath="Name"/>
         </StackPanel>
 
-        <CheckBox x:Name="AutoStartCheckBox" Grid.Row="4" Content="开机自动启动"
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="识别模型：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
+            <ComboBox x:Name="ModelComboBox" Width="240" HorizontalAlignment="Left"
+                      DisplayMemberPath="DisplayName"/>
+        </StackPanel>
+
+        <TextBlock x:Name="ModelStatusTextBlock" Grid.Row="5" Text=""
+                   Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="110,0,0,16"/>
+
+        <CheckBox x:Name="AutoStartCheckBox" Grid.Row="6" Content="开机自动启动"
                   Foreground="{StaticResource PaperInk}" Margin="0,0,0,12"/>
 
-        <CheckBox x:Name="AutocorrectPunctuationCheckBox" Grid.Row="5" Content="识别结果自动补全末尾标点"
+        <CheckBox x:Name="AutocorrectPunctuationCheckBox" Grid.Row="7" Content="识别结果自动补全末尾标点"
                   Foreground="{StaticResource PaperInk}" Margin="0,0,0,12"/>
 
-        <TextBlock x:Name="ResourceUsageTextBlock" Grid.Row="6" Text="占用：--"
+        <TextBlock x:Name="ResourceUsageTextBlock" Grid.Row="8" Text="占用：--"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" Margin="0,0,0,16"/>
 
-        <StackPanel Grid.Row="7" Orientation="Horizontal" Margin="0,0,0,16">
+        <StackPanel Grid.Row="9" Orientation="Horizontal" Margin="0,0,0,16">
             <TextBlock Text="历史记录保留：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
             <ComboBox x:Name="HistoryRetentionComboBox" Width="240" HorizontalAlignment="Left"
                       DisplayMemberPath="Display"/>
         </StackPanel>
 
-        <TextBlock Grid.Row="8" Text="语音识别完全在本机进行，不联网、不上传录音或文字到任何服务器。"
+        <TextBlock Grid.Row="10" Text="语音识别完全在本机进行，不联网、不上传录音或文字到任何服务器；下载更大的识别模型时会联网访问 Hugging Face。"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
-        <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="取消" Width="80" Height="26" Margin="0,0,8,0" Click="CancelButton_Click"/>
-            <Button Content="保存" Width="80" Height="26" IsDefault="True" Click="SaveButton_Click"/>
+        <StackPanel Grid.Row="12" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="CancelButtonElement" Content="取消" Width="80" Height="26" Margin="0,0,8,0" Click="CancelButton_Click"/>
+            <Button x:Name="SaveButtonElement" Content="保存" Width="80" Height="26" IsDefault="True" Click="SaveButton_Click"/>
         </StackPanel>
     </Grid>
 </Window>
