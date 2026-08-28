@@ -68,7 +68,7 @@ public sealed class DictationController : IDisposable
         {
             try
             {
-                _recorder.Start();
+                _recorder.Start(_settings.MicrophoneDeviceId);
                 RecordingStarted?.Invoke();
                 return true;
             }

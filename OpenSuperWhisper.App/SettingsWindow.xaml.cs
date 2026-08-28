@@ -1,15 +1,18 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Input;
+using OpenSuperWhisper.Audio;
 using OpenSuperWhisper.Core.Models;
 using OpenSuperWhisper.Storage;
 
 namespace OpenSuperWhisper.App;
 
 /// <summary>
-/// Real settings UI: rebind the push-to-talk key (captured live from a physical key press)
-/// and pick the recognition language. Save persists both via SettingsStore and applies the
-/// hotkey change immediately to the running hook - no app restart needed.
+/// Real settings UI: rebind the push-to-talk key (captured live from a physical key press),
+/// pick the recognition language, and pick which microphone to record from. Save persists all
+/// three via SettingsStore; the hotkey change applies immediately to the running hook, and the
+/// microphone/language choices apply on the next recording (DictationController re-reads
+/// AppSettings fresh every time) - no app restart needed either way.
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -21,6 +24,10 @@ public partial class SettingsWindow : Window
         new("中文", "zh"),
         new("英文", "en"),
     };
+
+    /// <summary>Id "" is the sentinel for "follow the system default input device" - not a
+    /// real device, always the first option.</summary>
+    private static readonly MicrophoneDevices.Info FollowSystemDefault = new("", "跟随系统默认");
 
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
@@ -42,6 +49,13 @@ public partial class SettingsWindow : Window
         LanguageComboBox.ItemsSource = LanguageOptions;
         LanguageComboBox.SelectedItem = LanguageOptions.FirstOrDefault(o => o.Value == settings.Language)
                                          ?? LanguageOptions[0];
+
+        // Re-enumerated fresh every time Settings opens - a Bluetooth headset that was
+        // disconnected last time this window was open might be connected now, and vice versa.
+        var micOptions = new[] { FollowSystemDefault }.Concat(MicrophoneDevices.List()).ToArray();
+        MicrophoneComboBox.ItemsSource = micOptions;
+        MicrophoneComboBox.SelectedItem = micOptions.FirstOrDefault(o => o.Id == settings.MicrophoneDeviceId)
+                                           ?? FollowSystemDefault;
     }
 
     private void HotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
@@ -76,6 +90,7 @@ public partial class SettingsWindow : Window
     {
         _settings.PushToTalkVirtualKeyCode = _pendingVkCode;
         _settings.Language = ((LanguageOption)LanguageComboBox.SelectedItem).Value;
+        _settings.MicrophoneDeviceId = ((MicrophoneDevices.Info)MicrophoneComboBox.SelectedItem).Id;
         _settingsStore.Save(_settings);
         _applyHotkeyLive(_pendingVkCode);
         Close();
