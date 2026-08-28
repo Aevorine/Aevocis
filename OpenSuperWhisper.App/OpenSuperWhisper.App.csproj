@@ -23,7 +23,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="Models\ggml-tiny.en.bin" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Models\ggml-tiny.en.bin" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>
