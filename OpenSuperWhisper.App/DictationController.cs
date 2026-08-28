@@ -15,6 +15,7 @@ public sealed class DictationController : IDisposable
     private readonly AppSettings _settings;
 
     private bool _isRecording;
+    private Task<bool>? _startTask;
 
     public event Action? RecordingStarted;
     public event Action? RecordingStopped;
@@ -63,18 +64,20 @@ public sealed class DictationController : IDisposable
         // false below if Start() actually fails, so a bad mic doesn't permanently no-op every
         // future press.
         _isRecording = true;
-        Task.Run(() =>
+        _startTask = Task.Run(() =>
         {
             try
             {
                 _recorder.Start();
                 RecordingStarted?.Invoke();
+                return true;
             }
             catch (Exception ex)
             {
                 Log.Error("启动录音失败", ex);
                 _isRecording = false;
                 RecordingFailed?.Invoke("麦克风不可用");
+                return false;
             }
         });
     }
@@ -83,6 +86,16 @@ public sealed class DictationController : IDisposable
     {
         if (!_isRecording) return;
         _isRecording = false;
+
+        // Start() runs on its own background task (see OnPressStarted) so the hook thread never
+        // blocks on it - but that means a quick press-release can reach here before Start() has
+        // actually opened the mic. Without waiting for it first, Stop() below would race ahead,
+        // find _waveIn still null, and silently return zero samples every time - recording
+        // "worked" (the overlay still shows "正在听" once Start() eventually finishes) but
+        // nothing was ever captured, and nothing gets typed. isFalse (started == false) means
+        // Start() itself failed - RecordingFailed already handled telling the user that.
+        var started = _startTask is not null && await _startTask;
+        if (!started) return;
 
         float[] samples;
         try
@@ -99,8 +112,15 @@ public sealed class DictationController : IDisposable
         }
         RecordingStopped?.Invoke();
 
-        // Shorter than ~0.1s: treat as an accidental tap, not a real utterance.
-        if (samples.Length < 1600) return;
+        // Shorter than ~0.1s: treat as an accidental tap, not a real utterance. Logged (not
+        // silent) because this exact shape - "recording looked like it started, nothing was
+        // typed" - is otherwise impossible to tell apart from a real transcription/injection
+        // failure after the fact.
+        if (samples.Length < 1600)
+        {
+            Log.Info($"录音样本过短（{samples.Length} 个采样点），当作误触摸跳过");
+            return;
+        }
 
         try
         {
