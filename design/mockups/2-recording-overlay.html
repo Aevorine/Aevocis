@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>方向预览 2/3 · 录音悬浮条</title>
+<style>
+  :root{
+    --clay:#D97757; --cream:#F5F0E8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    background:
+      linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 100%),
+      repeating-linear-gradient(45deg,#e9e6da 0 2px,#efece1 2px 4px);
+    min-height:100vh; font-family:"Segoe UI","Microsoft YaHei UI",sans-serif;
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
+    padding-bottom:120px; position:relative;
+  }
+  .label{position:fixed; top:24px; left:24px; font-size:13px; color:#6b6a67;}
+  .fake-desktop-hint{position:fixed; top:24px; right:24px; font-size:12px; color:#9a988c;}
+
+  .pill{
+    display:flex; align-items:center; gap:12px;
+    background:rgba(31,30,29,.92);
+    backdrop-filter:blur(6px);
+    border-radius:999px; padding:10px 18px 10px 14px;
+    box-shadow:0 14px 36px rgba(0,0,0,.28);
+    color:#F5F0E8;
+  }
+  .rec-dot{width:9px;height:9px;border-radius:50%;background:#E8785A;
+    box-shadow:0 0 0 0 rgba(232,120,90,.6); animation:pulse 1.4s infinite;}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(232,120,90,.55);}
+    70%{box-shadow:0 0 0 9px rgba(232,120,90,0);}
+    100%{box-shadow:0 0 0 0 rgba(232,120,90,0);}
+  }
+  .wave{display:flex; align-items:center; gap:2.5px; height:20px;}
+  .wave span{
+    width:3px; background:var(--clay); border-radius:2px;
+    animation:bar 900ms ease-in-out infinite;
+  }
+  .wave span:nth-child(1){height:6px; animation-delay:0ms;}
+  .wave span:nth-child(2){height:14px; animation-delay:120ms;}
+  .wave span:nth-child(3){height:20px; animation-delay:240ms;}
+  .wave span:nth-child(4){height:10px; animation-delay:360ms;}
+  .wave span:nth-child(5){height:16px; animation-delay:480ms;}
+  .wave span:nth-child(6){height:8px; animation-delay:600ms;}
+  @keyframes bar{0%,100%{transform:scaleY(.4);}50%{transform:scaleY(1);}}
+
+  .timer{font-size:13px; font-variant-numeric:tabular-nums; color:#D8D5C9; min-width:34px;}
+  .divider{width:1px; height:18px; background:rgba(255,255,255,.18);}
+  .esc{font-size:11.5px; color:#B8B5A8; display:flex; align-items:center; gap:5px; opacity:0; transition:opacity .15s;}
+  .pill:hover .esc{opacity:1;}
+  .esc kbd{background:rgba(255,255,255,.12); border-radius:4px; padding:1px 5px; font-family:Consolas,monospace;}
+
+  .caption{margin-top:16px; max-width:520px; text-align:center; color:#8a8878; font-size:12px;}
+  .live-preview{
+    margin-top:10px; max-width:460px; text-align:center; font-size:14px; color:#4a4944;
+    background:#FAF9F5; border:1px solid #E5E3DB; padding:8px 14px; border-radius:10px;
+  }
+</style>
+</head>
+<body>
+<div class="label">方向预览 2 / 3 —— 说话时屏幕上出现的悬浮条（半透明，不挡东西，任何软件上面都能显示）</div>
+<div class="fake-desktop-hint">（这里模拟你正在用别的软件时，说话状态显示的样子）</div>
+
+<div class="live-preview">帮我把这段会议纪要整理…</div>
+<div class="pill">
+  <span class="rec-dot"></span>
+  <div class="wave"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+  <div class="timer">0:03</div>
+  <div class="divider"></div>
+  <div class="esc"><kbd>Esc</kbd> 取消</div>
+</div>
+<div class="caption">松开快捷键 = 结束并输入 · 按 Esc = 取消这一句</div>
+</body>
+</html>

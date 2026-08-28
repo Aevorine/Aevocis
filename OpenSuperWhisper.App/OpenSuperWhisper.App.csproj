@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenSuperWhisper.Core\OpenSuperWhisper.Core.csproj" />
+    <ProjectReference Include="..\OpenSuperWhisper.Audio\OpenSuperWhisper.Audio.csproj" />
+    <ProjectReference Include="..\OpenSuperWhisper.Recognition\OpenSuperWhisper.Recognition.csproj" />
+    <ProjectReference Include="..\OpenSuperWhisper.Hotkeys\OpenSuperWhisper.Hotkeys.csproj" />
+    <ProjectReference Include="..\OpenSuperWhisper.TextInjection\OpenSuperWhisper.TextInjection.csproj" />
+    <ProjectReference Include="..\OpenSuperWhisper.Storage\OpenSuperWhisper.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Models\ggml-tiny.en.bin" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

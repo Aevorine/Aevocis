@@ -1,0 +1,38 @@
+<Application x:Class="OpenSuperWhisper.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:OpenSuperWhisper.App">
+    <Application.Resources>
+
+        <!-- 方向 B - 纸感 Paper: shared palette for MainWindow / SettingsWindow / RecordingOverlayWindow.
+             Centralized here so all three windows read as one coherent app instead of each
+             repeating its own hex values. -->
+        <SolidColorBrush x:Key="PaperBackground" Color="#FAF7F0"/>
+        <SolidColorBrush x:Key="PaperHeader" Color="#EFE9DC"/>
+        <SolidColorBrush x:Key="PaperSurface" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="PaperBorder" Color="#E6DED0"/>
+        <SolidColorBrush x:Key="PaperInk" Color="#2C2924"/>
+        <SolidColorBrush x:Key="PaperMuted" Color="#7A7263"/>
+        <SolidColorBrush x:Key="PaperAccent" Color="#4D6A5A"/>
+        <SolidColorBrush x:Key="PaperAccentForeground" Color="#FAF7F0"/>
+
+        <Style TargetType="Window">
+            <Setter Property="Background" Value="{StaticResource PaperBackground}"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+        </Style>
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource PaperInk}"/>
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource PaperAccent}"/>
+            <Setter Property="Foreground" Value="{StaticResource PaperAccentForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource PaperAccent}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+    </Application.Resources>
+</Application>

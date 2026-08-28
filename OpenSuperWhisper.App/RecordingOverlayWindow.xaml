@@ -1,0 +1,24 @@
+<Window x:Class="OpenSuperWhisper.App.RecordingOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OpenSuperWhisper"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        Focusable="False"
+        WindowStartupLocation="Manual">
+    <Border Background="{StaticResource PaperBackground}" BorderBrush="{StaticResource PaperAccent}"
+            BorderThickness="1.5" CornerRadius="18" Padding="18,10">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource PaperAccent}"
+                     Margin="0,0,8,0" VerticalAlignment="Center"/>
+            <TextBlock x:Name="StatusText" Text="正在听..." Foreground="{StaticResource PaperInk}"
+                       FontSize="13" FontFamily="Segoe UI" VerticalAlignment="Center"/>
+        </StackPanel>
+    </Border>
+</Window>
