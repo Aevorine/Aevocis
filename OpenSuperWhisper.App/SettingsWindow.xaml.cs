@@ -26,6 +26,10 @@ public partial class SettingsWindow : Window
         new("自动检测", "auto"),
         new("中文", "zh"),
         new("英文", "en"),
+        // F03: 一句话里中英文混说（"帮我 commit 一下"）。内部仍走 Whisper 的 auto 语言检测，
+        // 但额外用 WithPrompt 给出中英混合示例文本引导解码 - 实测能显著减少英文技术词被错误
+        // 识别成读音相近的中文/英文词、以及简繁体漂移的问题，见 WhisperTranscriptionEngine。
+        new("中英混合", "mixed"),
     };
 
     private static readonly RetentionOption[] RetentionOptions =

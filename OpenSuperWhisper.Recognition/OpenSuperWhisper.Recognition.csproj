@@ -8,7 +8,14 @@
 
   <ItemGroup>
     <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <!-- CPU runtime: always present, guaranteed fallback on every machine. -->
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+    <!-- F16: GPU runtime via Vulkan - unlike the CUDA runtime (NVIDIA-only, ~10x larger package),
+         Vulkan covers NVIDIA/AMD/Intel GPUs including integrated ones, which is the hardware most
+         users actually have. Whisper.net's native loader auto-detects at startup (priority order
+         CUDA > Vulkan > CoreML > OpenVino > CPU) and silently falls back to the CPU runtime above
+         if no compatible GPU/driver is found - no app code needs to implement that detection. -->
+    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
   </ItemGroup>
 
   <ItemGroup>
