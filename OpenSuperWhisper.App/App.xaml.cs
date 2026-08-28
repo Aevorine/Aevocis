@@ -105,6 +105,7 @@ public partial class App : Application
         _engine = engine;
         ITextInjector injector = new UnicodeTextInjector();
         var pushToTalkHotkey = new GlobalPushToTalkHotkey(settings.PushToTalkVirtualKeyCode);
+        pushToTalkHotkey.SetAppSpecificHotkeys(settings.AppSpecificHotkeys); // F12
         _pushToTalkHotkey = pushToTalkHotkey;
         IHotkeyListener hotkey = pushToTalkHotkey;
 
@@ -375,7 +376,11 @@ public partial class App : Application
 
     private void ShowSettingsWindow()
     {
-        var window = new SettingsWindow(_settings!, _settingsStore!, vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk));
+        var window = new SettingsWindow(
+            _settings!,
+            _settingsStore!,
+            vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk),
+            appHotkeys => _pushToTalkHotkey!.SetAppSpecificHotkeys(appHotkeys)); // F12
         window.ShowDialog();
     }
 

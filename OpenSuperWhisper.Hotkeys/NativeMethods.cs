@@ -25,6 +25,14 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     public static extern IntPtr GetModuleHandle(string lpModuleName);
 
+    // Used by ActiveWindowInfo (F06/F12) to find which process owns the focused window - the
+    // standard GetForegroundWindow + GetWindowThreadProcessId combo documented on MSDN.
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct KBDLLHOOKSTRUCT
     {

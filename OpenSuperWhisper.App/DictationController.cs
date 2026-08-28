@@ -1,5 +1,6 @@
 using OpenSuperWhisper.Core;
 using OpenSuperWhisper.Core.Models;
+using OpenSuperWhisper.Hotkeys;
 using OpenSuperWhisper.Storage;
 
 namespace OpenSuperWhisper.App;
@@ -128,7 +129,21 @@ public sealed class DictationController : IDisposable
 
         try
         {
-            var text = await _engine.TranscribeAsync(samples, _settings.Language);
+            // F06: bias recognition toward whatever app is focused right now (e.g. keep English
+            // identifiers untranslated in an editor, prefer colloquial phrasing in a chat app).
+            // Resolved here (right before transcribing, not at press-start) per spec; the gap
+            // between key-up and this point is just the Stop()/PeakAmplitude work above, so the
+            // focused window practically never changes in between.
+            string? appPrompt = null;
+            var activeProcess = ActiveWindowInfo.GetActiveProcessName();
+            if (AppSpecificLookup.TryGet(_settings.AppSpecificPrompts, activeProcess, out var configuredPrompt)
+                && !string.IsNullOrWhiteSpace(configuredPrompt))
+            {
+                appPrompt = configuredPrompt;
+                Log.Info($"应用专属提示词生效（{activeProcess}）：\"{appPrompt}\"");
+            }
+
+            var text = await _engine.TranscribeAsync(samples, _settings.Language, appPrompt);
             Log.Info($"识别结果：\"{text}\"");
             if (string.IsNullOrWhiteSpace(text) || IsNonSpeechMarker(text)) return;
 

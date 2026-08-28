@@ -2,13 +2,15 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="设置"
-        Height="480" Width="420"
+        Height="760" Width="440"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="{StaticResource PaperBackground}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -60,7 +62,31 @@
         <TextBlock Grid.Row="8" Text="语音识别完全在本机进行，不联网、不上传录音或文字到任何服务器。"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
-        <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="9" Margin="0,0,0,16">
+            <TextBlock Text="按软件自动调语气（F06）" FontWeight="Bold" Foreground="{StaticResource PaperInk}" Margin="0,0,0,2"/>
+            <TextBlock Text="每行一条，格式：进程名|提示词。进程名是任务管理器里显示的名字，不含 .exe（如 WeChat、Code）。不配置=不受影响。"
+                       Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <TextBox x:Name="AppPromptsTextBox" Height="80" AcceptsReturn="True" TextWrapping="NoWrap"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                     FontFamily="Consolas" FontSize="12"/>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock Text="快速添加预设：" VerticalAlignment="Center" Foreground="{StaticResource PaperMuted}" FontSize="11" Margin="0,0,4,0"/>
+                <Button Content="微信" Tag="0" Width="50" Height="22" Margin="0,0,4,0" Click="PromptPreset_Click"/>
+                <Button Content="VSCode" Tag="1" Width="60" Height="22" Margin="0,0,4,0" Click="PromptPreset_Click"/>
+                <Button Content="Claude Code" Tag="2" Width="90" Height="22" Click="PromptPreset_Click"/>
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel Grid.Row="10" Margin="0,0,0,16">
+            <TextBlock Text="按软件单独设置快捷键（F12）" FontWeight="Bold" Foreground="{StaticResource PaperInk}" Margin="0,0,0,2"/>
+            <TextBlock Text="每行一条，格式：进程名|按键名（如 F13、Oem3）。未列出的软件继续使用上方的全局按键，不受影响。"
+                       Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <TextBox x:Name="AppHotkeysTextBox" Height="60" AcceptsReturn="True" TextWrapping="NoWrap"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                     FontFamily="Consolas" FontSize="12"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="12" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="取消" Width="80" Height="26" Margin="0,0,8,0" Click="CancelButton_Click"/>
             <Button Content="保存" Width="80" Height="26" IsDefault="True" Click="SaveButton_Click"/>
         </StackPanel>
