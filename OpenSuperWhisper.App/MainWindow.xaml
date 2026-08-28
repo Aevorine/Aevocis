@@ -29,7 +29,7 @@
         <Border DockPanel.Dock="Top" Background="{StaticResource PaperSurface}"
                 BorderBrush="{StaticResource PaperBorder}" BorderThickness="0,1,0,1" Padding="14,8">
             <DockPanel>
-                <TextBlock Text="模型：tiny.en" FontSize="11" Foreground="{StaticResource PaperMuted}"
+                <TextBlock x:Name="ModelLabel" Text="模型：" FontSize="11" Foreground="{StaticResource PaperMuted}"
                            DockPanel.Dock="Left" VerticalAlignment="Center"/>
                 <Button x:Name="ClearHistoryButton" Content="清空历史" HorizontalAlignment="Right"
                         Padding="8,2" FontSize="11" Click="ClearHistoryButton_Click"/>

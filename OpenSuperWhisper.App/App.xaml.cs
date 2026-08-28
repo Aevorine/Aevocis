@@ -56,7 +56,7 @@ public partial class App : Application
 
         if (string.IsNullOrWhiteSpace(settings.ModelPath) || !File.Exists(settings.ModelPath))
         {
-            settings.ModelPath = Path.Combine(AppContext.BaseDirectory, "Models", "ggml-tiny.en.bin");
+            settings.ModelPath = Path.Combine(AppContext.BaseDirectory, "Models", "ggml-small.bin");
             settingsStore.Save(settings);
         }
 

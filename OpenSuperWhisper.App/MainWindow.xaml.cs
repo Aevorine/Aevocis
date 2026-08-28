@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using OpenSuperWhisper.Core.Models;
 using OpenSuperWhisper.Storage;
@@ -14,6 +15,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         _history = history;
         _openSettings = openSettings;
+        var modelName = Path.GetFileNameWithoutExtension(settings.ModelPath).Replace("ggml-", "");
+        ModelLabel.Text = $"模型：{modelName}";
         RefreshHistory();
 
         // Left-click on the tray icon shows/hides this window; closing the window
