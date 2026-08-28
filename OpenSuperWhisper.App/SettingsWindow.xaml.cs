@@ -25,9 +25,10 @@ public partial class SettingsWindow : Window
         new("英文", "en"),
     };
 
-    /// <summary>Id "" is the sentinel for "follow the system default input device" - not a
-    /// real device, always the first option.</summary>
-    private static readonly MicrophoneDevices.Info FollowSystemDefault = new("", "跟随系统默认");
+    /// <summary>Id "" is the sentinel for automatic selection (prefer whichever headset/etc.
+    /// was most recently connected, fall back to the built-in mic) - not a real device, always
+    /// the first option.</summary>
+    private static readonly MicrophoneDevices.Info FollowSystemDefault = new("", "自动（优先刚连接的耳机等设备）");
 
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;

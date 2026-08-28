@@ -35,15 +35,27 @@ public sealed class MicRecorder : IAudioRecorder
     /// WaveInEvent's default constructor (DeviceNumber = -1, "WAVE_MAPPER") asks the legacy
     /// WinMM mapper to pick a device, and on machines with several capture endpoints - Bluetooth
     /// headset, a virtual/remote-desktop audio driver, the real built-in mic - that legacy
-    /// mapper can silently resolve to one that isn't what "Settings > Sound > 输入设备" shows as
-    /// the actual default (it's frequently a device bound to the separate "Communications" role
-    /// instead, e.g. a Bluetooth headset). Recording then "succeeds" (no exception, samples come
-    /// back) but can be near-silent, which downstream just looks like "nothing was said."
+    /// mapper can silently resolve to one that isn't what the user actually wants. Recording
+    /// then "succeeds" (no exception, samples come back) but can be near-silent, which
+    /// downstream just looks like "nothing was said."
     ///
-    /// Resolution order: (1) a specific device the user picked in Settings, matched by its
-    /// stable WASAPI endpoint ID; (2) WASAPI's Multimedia-role default endpoint, which is the
-    /// one that actually matches the user's visible default input device; (3) WAVE_MAPPER, the
-    /// previous, least reliable behavior - only reached if both of the above fail.
+    /// Resolution order, re-evaluated fresh on every recording (never cached), so plugging in or
+    /// disconnecting a device between one dictation and the next is picked up automatically with
+    /// no restart and no trip to Settings:
+    /// 1. A specific device the user pinned in Settings, matched by its stable WASAPI endpoint
+    ///    ID - always wins outright if it's currently active.
+    /// 2. Otherwise, automatic: Windows separately tracks a "Communications"-role default
+    ///    (auto-assigned to whichever headset/handsfree device was most recently connected -
+    ///    confirmed on this project's dev machine: pairing a Bluetooth headset makes Windows
+    ///    flag it here without touching the general default at all) and a "Multimedia"-role
+    ///    default (the general "system default", which stays on the built-in mic array unless
+    ///    the user manually changes it in Windows' own Sound settings). When they differ, that
+    ///    difference itself *is* "a headset just got connected" - so prefer the
+    ///    Communications-role device, unless its capture channel is muted (a muted device would
+    ///    just reproduce the original bug), in which case fall back to Multimedia instead of
+    ///    silently failing.
+    /// 3. WAVE_MAPPER, the previous, least reliable behavior - only reached if everything above
+    ///    fails outright (e.g. WASAPI enumeration itself throws).
     /// </summary>
     private static int ResolveDeviceIndex(string? microphoneDeviceId)
     {
@@ -64,28 +76,52 @@ public sealed class MicRecorder : IAudioRecorder
                             Log.Info($"麦克风：使用手动选择的输入设备 \"{chosen.FriendlyName}\"（WaveIn 设备号 {idx}）");
                             return idx.Value;
                         }
-                        Log.Info($"麦克风：手动选择的设备 \"{chosen.FriendlyName}\" 在旧版设备列表中未找到匹配项，退回系统默认");
+                        Log.Info($"麦克风：手动选择的设备 \"{chosen.FriendlyName}\" 在旧版设备列表中未找到匹配项，退回自动选择");
                     }
                     else
                     {
-                        Log.Info($"麦克风：手动选择的设备当前不可用（{chosen.FriendlyName}，状态 {chosen.State}），退回系统默认");
+                        Log.Info($"麦克风：手动选择的设备当前不可用（{chosen.FriendlyName}，状态 {chosen.State}），退回自动选择");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Info($"麦克风：手动选择的设备已找不到，退回系统默认 - {ex.Message}");
+                    Log.Info($"麦克风：手动选择的设备已找不到，退回自动选择 - {ex.Message}");
                 }
             }
 
-            using var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
-            var targetName = defaultDevice.FriendlyName;
-            var defaultIdx = FindWaveInIndexByName(targetName);
-            if (defaultIdx is not null)
+            using var multimediaDefault = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
+            MMDevice? preferred = null;
+            try
             {
-                Log.Info($"麦克风：已定位到系统默认输入设备 \"{targetName}\"（WaveIn 设备号 {defaultIdx}）");
-                return defaultIdx.Value;
+                using var commsDefault = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                if (commsDefault.ID != multimediaDefault.ID)
+                {
+                    if (!commsDefault.AudioEndpointVolume.Mute)
+                    {
+                        preferred = commsDefault;
+                        Log.Info($"麦克风：检测到「默认通信设备」与「默认设备」不同（\"{commsDefault.FriendlyName}\"），当作刚接入的设备优先使用");
+                    }
+                    else
+                    {
+                        Log.Info($"麦克风：「默认通信设备」\"{commsDefault.FriendlyName}\" 当前处于静音状态，跳过，改用系统默认设备");
+                    }
+                }
             }
-            Log.Info($"麦克风：系统默认输入设备 \"{targetName}\" 在旧版设备列表中未找到匹配项，退回自动选择");
+            catch
+            {
+                // No separate Communications-role endpoint (or querying it failed) - fine, just
+                // use the Multimedia default below.
+            }
+
+            var target = preferred ?? multimediaDefault;
+            var targetName = target.FriendlyName;
+            var idx2 = FindWaveInIndexByName(targetName);
+            if (idx2 is not null)
+            {
+                Log.Info($"麦克风：自动选中输入设备 \"{targetName}\"（WaveIn 设备号 {idx2}）");
+                return idx2.Value;
+            }
+            Log.Info($"麦克风：自动选中的设备 \"{targetName}\" 在旧版设备列表中未找到匹配项，退回自动选择");
         }
         catch (Exception ex)
         {
