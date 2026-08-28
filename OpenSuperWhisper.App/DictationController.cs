@@ -14,6 +14,7 @@ public sealed class DictationController : IDisposable
     private readonly HistoryStore _history;
     private readonly AppSettings _settings;
     private readonly TermDictionaryStore _terms;
+    private readonly IDraftConfirmation _draftConfirmation;
 
     private bool _isRecording;
     private Task<bool>? _startTask;
@@ -33,7 +34,8 @@ public sealed class DictationController : IDisposable
         IHotkeyListener hotkey,
         HistoryStore history,
         AppSettings settings,
-        TermDictionaryStore terms)
+        TermDictionaryStore terms,
+        IDraftConfirmation draftConfirmation)
     {
         _recorder = recorder;
         _engine = engine;
@@ -42,6 +44,7 @@ public sealed class DictationController : IDisposable
         _history = history;
         _settings = settings;
         _terms = terms;
+        _draftConfirmation = draftConfirmation;
 
         _hotkey.PressStarted += OnPressStarted;
         _hotkey.PressEnded += OnPressEnded;
@@ -147,6 +150,22 @@ public sealed class DictationController : IDisposable
                 if (fixedText != text)
                     Log.Info($"标点自动补全：\"{text}\" -> \"{fixedText}\"");
                 text = fixedText;
+            }
+
+            // F11: optional "show draft first" gate. Never blocks this thread - ConfirmAsync's
+            // task only completes once the user acts (Enter/Esc) or dismisses the confirm window
+            // another way; everything else (a new hotkey press, the tray icon, etc.) stays fully
+            // responsive while it's pending. null means the user cancelled - nothing gets typed
+            // or saved to history for this utterance.
+            if (_settings.ShowDraftBeforeInject)
+            {
+                var confirmed = await _draftConfirmation.ConfirmAsync(text);
+                if (confirmed is null)
+                {
+                    Log.Info("草稿确认已取消，未注入文本");
+                    return;
+                }
+                text = confirmed;
             }
 
             // InjectText throws if the text didn't actually land (SendInput reported fewer

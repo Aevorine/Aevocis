@@ -44,6 +44,7 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
     private readonly Action<int> _applyHotkeyLive;
+    private readonly Action<PushToTalkMode> _applyModeLive;
 
     private bool _capturingHotkey;
     private int _pendingVkCode;
@@ -51,15 +52,27 @@ public partial class SettingsWindow : Window
     private TimeSpan _lastCpuTime;
     private DateTime _lastCpuSampleAt;
 
-    public SettingsWindow(AppSettings settings, SettingsStore settingsStore, Action<int> applyHotkeyLive)
+    public SettingsWindow(
+        AppSettings settings,
+        SettingsStore settingsStore,
+        Action<int> applyHotkeyLive,
+        Action<PushToTalkMode> applyModeLive)
     {
         InitializeComponent();
         _settings = settings;
         _settingsStore = settingsStore;
         _applyHotkeyLive = applyHotkeyLive;
+        _applyModeLive = applyModeLive;
 
         _pendingVkCode = settings.PushToTalkVirtualKeyCode;
         HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
+
+        // F09: default to Hold's radio button unless the saved setting is Toggle.
+        ToggleModeRadioButton.IsChecked = settings.PushToTalkMode == PushToTalkMode.Toggle;
+        HoldModeRadioButton.IsChecked = settings.PushToTalkMode != PushToTalkMode.Toggle;
+
+        // F11
+        ShowDraftBeforeInjectCheckBox.IsChecked = settings.ShowDraftBeforeInject;
 
         LanguageComboBox.ItemsSource = LanguageOptions;
         LanguageComboBox.SelectedItem = LanguageOptions.FirstOrDefault(o => o.Value == settings.Language)
@@ -145,8 +158,11 @@ public partial class SettingsWindow : Window
         _settings.AutoStartWithWindows = AutoStartCheckBox.IsChecked == true;
         _settings.AutocorrectPunctuation = AutocorrectPunctuationCheckBox.IsChecked == true;
         _settings.HistoryRetentionDays = ((RetentionOption)HistoryRetentionComboBox.SelectedItem).Days;
+        _settings.PushToTalkMode = ToggleModeRadioButton.IsChecked == true ? PushToTalkMode.Toggle : PushToTalkMode.Hold;
+        _settings.ShowDraftBeforeInject = ShowDraftBeforeInjectCheckBox.IsChecked == true;
         _settingsStore.Save(_settings);
         _applyHotkeyLive(_pendingVkCode);
+        _applyModeLive(_settings.PushToTalkMode);
         AutoStart.SetEnabled(_settings.AutoStartWithWindows);
         Close();
     }
