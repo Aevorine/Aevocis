@@ -1,0 +1,40 @@
+<Window x:Class="OpenSuperWhisper.App.TermDictionaryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="专业词典"
+        Height="440" Width="460"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="{StaticResource PaperBackground}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="识别到左边这个词时，自动替换成右边的词（比如某个专有名词总被听错）。"
+                   Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <DataGrid x:Name="TermsGrid" Grid.Row="1" AutoGenerateColumns="False"
+                  CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                  Background="{StaticResource PaperSurface}" BorderBrush="{StaticResource PaperBorder}" BorderThickness="1"
+                  RowHeaderWidth="0" Margin="0,0,0,10">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="错误词（识别常出现的）" Binding="{Binding Wrong, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                <DataGridTextColumn Header="正确词（替换成）" Binding="{Binding Correct, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Content="添加一行" Width="90" Height="26" Margin="0,0,8,0" Click="AddRowButton_Click"/>
+            <Button Content="删除选中行" Width="90" Height="26" Click="DeleteRowButton_Click"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="取消" Width="80" Height="26" Margin="0,0,8,0" Click="CancelButton_Click"/>
+            <Button Content="保存" Width="80" Height="26" IsDefault="True" Click="SaveButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

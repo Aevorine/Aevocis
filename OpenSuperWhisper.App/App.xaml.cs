@@ -96,6 +96,13 @@ public partial class App : Application
             settingsStore.Save(settings);
         }
 
+        // F29: shown once per install, non-modally so it never delays model loading/hotkey
+        // registration below - the user can read it while the app finishes getting ready.
+        if (!settings.HasSeenOnboarding)
+        {
+            new OnboardingWindow(settings, settingsStore).Show();
+        }
+
         var purgedCount = historyStore.PurgeOlderThan(settings.HistoryRetentionDays);
         if (purgedCount > 0)
             Log.Info($"历史记录自动过期：清理了 {purgedCount} 条超过 {settings.HistoryRetentionDays} 天的记录");

@@ -3,6 +3,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using OpenSuperWhisper.Audio;
 using OpenSuperWhisper.Core.Models;
 using OpenSuperWhisper.Storage;
@@ -154,6 +155,84 @@ public partial class SettingsWindow : Window
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void EditTermDictionaryButton_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new TermDictionaryWindow(new TermDictionaryStore());
+        window.ShowDialog();
+    }
+
+    /// <summary>F31: exports the currently-loaded settings plus the professional-vocabulary
+    /// dictionary (re-read fresh from disk, same as TermDictionaryWindow does, since this window
+    /// never caches it) into one JSON file via SettingsPortability.</summary>
+    private void ExportSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "导出设置",
+            Filter = "JSON 文件 (*.json)|*.json",
+            FileName = "OpenSuperWhisper-settings.json",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            var terms = new TermDictionaryStore().Load();
+            SettingsPortability.Export(dialog.FileName, _settings, terms);
+            MessageBox.Show("设置已导出。", "超语音", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"导出失败：{ex.Message}", "超语音", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>F31: reads the bundle back and writes both halves to disk. Mutates the shared
+    /// <see cref="_settings"/> instance in place (rather than swapping in the deserialized
+    /// object) and re-applies the hotkey/autostart live, same as Save - so most of the imported
+    /// settings take effect immediately, matching what SaveButton_Click already does. What
+    /// doesn't take effect until restart (recognition model path/engine, history retention purge
+    /// timing) is called out honestly in the confirmation message rather than silently claimed to
+    /// "just work".</summary>
+    private void ImportSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "导入设置",
+            Filter = "JSON 文件 (*.json)|*.json",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            var bundle = SettingsPortability.Import(dialog.FileName);
+            CopySettings(bundle.Settings, _settings);
+            _settingsStore.Save(_settings);
+            new TermDictionaryStore().Save(bundle.Terms);
+            _applyHotkeyLive(_settings.PushToTalkVirtualKeyCode);
+            AutoStart.SetEnabled(_settings.AutoStartWithWindows);
+            MessageBox.Show(
+                "设置已导入，热键/语言/麦克风等已立即生效。识别模型路径、历史保留期等少数设置需要重启程序才能完全生效。",
+                "超语音", MessageBoxButton.OK, MessageBoxImage.Information);
+            Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"导入失败：{ex.Message}", "超语音", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static void CopySettings(AppSettings from, AppSettings to)
+    {
+        to.ModelPath = from.ModelPath;
+        to.Language = from.Language;
+        to.MicrophoneDeviceId = from.MicrophoneDeviceId;
+        to.PushToTalkVirtualKeyCode = from.PushToTalkVirtualKeyCode;
+        to.AutoStartWithWindows = from.AutoStartWithWindows;
+        to.AutocorrectPunctuation = from.AutocorrectPunctuation;
+        to.HistoryRetentionDays = from.HistoryRetentionDays;
+        to.HasSeenOnboarding = from.HasSeenOnboarding;
     }
 
     private static string VkToDisplayName(int vk)
