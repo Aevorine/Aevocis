@@ -36,6 +36,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4">
@@ -58,31 +60,40 @@
                       DisplayMemberPath="Name"/>
         </StackPanel>
 
-        <CheckBox x:Name="AutoStartCheckBox" Grid.Row="4" Content="开机自动启动"
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="识别模型：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
+            <ComboBox x:Name="ModelComboBox" Width="240" HorizontalAlignment="Left"
+                      DisplayMemberPath="DisplayName"/>
+        </StackPanel>
+
+        <TextBlock x:Name="ModelStatusTextBlock" Grid.Row="5" Text=""
+                   Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="110,0,0,16"/>
+
+        <CheckBox x:Name="AutoStartCheckBox" Grid.Row="6" Content="开机自动启动"
                   Foreground="{StaticResource PaperInk}" Margin="0,0,0,12"/>
 
-        <CheckBox x:Name="AutocorrectPunctuationCheckBox" Grid.Row="5" Content="识别结果自动补全末尾标点"
+        <CheckBox x:Name="AutocorrectPunctuationCheckBox" Grid.Row="7" Content="识别结果自动补全末尾标点"
                   Foreground="{StaticResource PaperInk}" Margin="0,0,0,12"/>
 
-        <TextBlock x:Name="ResourceUsageTextBlock" Grid.Row="6" Text="占用：--"
+        <TextBlock x:Name="ResourceUsageTextBlock" Grid.Row="8" Text="占用：--"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" Margin="0,0,0,16"/>
 
-        <StackPanel Grid.Row="7" Orientation="Horizontal" Margin="0,0,0,16">
+        <StackPanel Grid.Row="9" Orientation="Horizontal" Margin="0,0,0,16">
             <TextBlock Text="历史记录保留：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
             <ComboBox x:Name="HistoryRetentionComboBox" Width="240" HorizontalAlignment="Left"
                       DisplayMemberPath="Display"/>
         </StackPanel>
 
-        <StackPanel Grid.Row="8" Orientation="Horizontal" Margin="0,0,0,16">
+        <StackPanel Grid.Row="10" Orientation="Horizontal" Margin="0,0,0,16">
             <Button Content="编辑专业词典..." Width="120" Height="26" Margin="0,0,8,0" Click="EditTermDictionaryButton_Click"/>
             <Button Content="导出设置..." Width="90" Height="26" Margin="0,0,8,0" Click="ExportSettingsButton_Click"/>
             <Button Content="导入设置..." Width="90" Height="26" Click="ImportSettingsButton_Click"/>
         </StackPanel>
 
-        <TextBlock Grid.Row="9" Text="语音识别完全在本机进行，不联网、不上传录音或文字到任何服务器。"
+        <TextBlock Grid.Row="11" Text="语音识别完全在本机进行，不联网、不上传录音或文字到任何服务器；下载更大的识别模型时会联网访问 Hugging Face。"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
-        <StackPanel Grid.Row="10" Orientation="Horizontal" Margin="0,0,0,12">
+        <StackPanel Grid.Row="12" Orientation="Horizontal" Margin="0,0,0,12">
             <TextBlock Text="说话方式：" Width="110" VerticalAlignment="Top" Margin="0,2,0,0" Foreground="{StaticResource PaperInk}"/>
             <StackPanel Orientation="Vertical">
                 <RadioButton x:Name="HoldModeRadioButton" GroupName="PushToTalkMode"
@@ -94,12 +105,12 @@
             </StackPanel>
         </StackPanel>
 
-        <CheckBox x:Name="ShowDraftBeforeInjectCheckBox" Grid.Row="11" Margin="0,0,0,12" VerticalContentAlignment="Top">
+        <CheckBox x:Name="ShowDraftBeforeInjectCheckBox" Grid.Row="13" Margin="0,0,0,12" VerticalContentAlignment="Top">
             <TextBlock Text="识别完成后先弹出小窗口确认/编辑，回车再打字（不勾选则直接秒输入）"
                        Foreground="{StaticResource PaperInk}" TextWrapping="Wrap" MaxWidth="340"/>
         </CheckBox>
 
-        <StackPanel Grid.Row="12" Margin="0,0,0,16">
+        <StackPanel Grid.Row="14" Margin="0,0,0,16">
             <TextBlock Text="按软件自动调语气（F06）" FontWeight="Bold" Foreground="{StaticResource PaperInk}" Margin="0,0,0,2"/>
             <TextBlock Text="每行一条，格式：进程名|提示词。进程名是任务管理器里显示的名字，不含 .exe（如 WeChat、Code）。不配置=不受影响。"
                        Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
@@ -114,7 +125,7 @@
             </StackPanel>
         </StackPanel>
 
-        <StackPanel Grid.Row="13" Margin="0,0,0,16">
+        <StackPanel Grid.Row="15" Margin="0,0,0,16">
             <TextBlock Text="按软件单独设置快捷键（F12）" FontWeight="Bold" Foreground="{StaticResource PaperInk}" Margin="0,0,0,2"/>
             <TextBlock Text="每行一条，格式：进程名|按键名（如 F13、Oem3）。未列出的软件继续使用上方的全局按键，不受影响。"
                        Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
@@ -123,29 +134,29 @@
                      FontFamily="Consolas" FontSize="12"/>
         </StackPanel>
 
-        <TextBlock Grid.Row="14" Text="口头命令（说出来直接执行，不会被打出来）：" FontWeight="Bold"
+        <TextBlock Grid.Row="16" Text="口头命令（说出来直接执行，不会被打出来）：" FontWeight="Bold"
                    Foreground="{StaticResource PaperInk}" Margin="0,0,0,4"/>
-        <TextBox x:Name="VoiceCommandsTextBox" Grid.Row="15" Height="90" Margin="0,0,0,4"
+        <TextBox x:Name="VoiceCommandsTextBox" Grid.Row="17" Height="90" Margin="0,0,0,4"
                  AcceptsReturn="True" TextWrapping="NoWrap"
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                  FontFamily="Consolas" FontSize="12"/>
-        <TextBlock Grid.Row="16" Text="每行一条，格式：动作|触发词，动作可选：取消 / 换行 / 大写后缀（大写后缀命中句尾，转写句尾之前那部分文字为大写后再打出来）。"
+        <TextBlock Grid.Row="18" Text="每行一条，格式：动作|触发词，动作可选：取消 / 换行 / 大写后缀（大写后缀命中句尾，转写句尾之前那部分文字为大写后再打出来）。"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
-        <TextBlock Grid.Row="17" Text="语音宏（说出触发短语，一次执行「切软件+打字」等一串动作）：" FontWeight="Bold"
+        <TextBlock Grid.Row="19" Text="语音宏（说出触发短语，一次执行「切软件+打字」等一串动作）：" FontWeight="Bold"
                    Foreground="{StaticResource PaperInk}" Margin="0,0,0,4"/>
-        <TextBox x:Name="MacrosTextBox" Grid.Row="18" Height="90" Margin="0,0,0,4"
+        <TextBox x:Name="MacrosTextBox" Grid.Row="20" Height="90" Margin="0,0,0,4"
                  AcceptsReturn="True" TextWrapping="NoWrap"
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                  FontFamily="Consolas" FontSize="12"/>
-        <TextBlock Grid.Row="19" Text="每行一条，格式：触发短语|动作类型:值;动作类型:值...，动作类型可选：打开(程序路径或程序名) / 打字(要打的文字) / 按键(如 Enter)。例：打开微信说早上好|打开:WeChat.exe;打字:早上好"
+        <TextBlock Grid.Row="21" Text="每行一条，格式：触发短语|动作类型:值;动作类型:值...，动作类型可选：打开(程序路径或程序名) / 打字(要打的文字) / 按键(如 Enter)。例：打开微信说早上好|打开:WeChat.exe;打字:早上好"
                    Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
         </Grid>
         </ScrollViewer>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,4,0">
-            <Button Content="取消" Width="80" Height="26" Margin="0,0,8,0" Click="CancelButton_Click"/>
-            <Button Content="保存" Width="80" Height="26" IsDefault="True" Click="SaveButton_Click"/>
+            <Button x:Name="CancelButtonElement" Content="取消" Width="80" Height="26" Margin="0,0,8,0" Click="CancelButton_Click"/>
+            <Button x:Name="SaveButtonElement" Content="保存" Width="80" Height="26" IsDefault="True" Click="SaveButton_Click"/>
         </StackPanel>
     </Grid>
 </Window>

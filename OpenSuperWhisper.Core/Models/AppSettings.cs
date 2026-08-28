@@ -13,6 +13,12 @@ public enum PushToTalkMode
 public sealed class AppSettings
 {
     public string ModelPath { get; set; } = "";
+    /// <summary>F01: which recognition model the user picked, e.g. "small"/"medium"/"large-v3-turbo"
+    /// (see OpenSuperWhisper.Recognition.ModelCatalog for the full list). Default is "small" - the
+    /// original, always-bundled model - so existing users who never touch this setting see no
+    /// change in behavior. ModelPath above is the resolved on-disk path derived from this at
+    /// startup/switch time; ModelSize is the durable user preference.</summary>
+    public string ModelSize { get; set; } = "small";
     public string Language { get; set; } = "auto";
     /// <summary>WASAPI endpoint ID of the microphone to record from, or "" to follow whichever
     /// device Windows shows as the system's default input device.</summary>
