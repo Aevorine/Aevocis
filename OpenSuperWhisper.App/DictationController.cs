@@ -22,6 +22,12 @@ public sealed class DictationController : IDisposable
     public event Action? RecordingStopped;
     public event Action<string>? TranscriptionCompleted;
 
+    /// <summary>F17: raised each time the transcription engine reports a newly recognized
+    /// segment while recognizing a just-finished recording (not while the user is still
+    /// speaking - see ITranscriptionEngine.TranscribeAsync). Carries the transcript accumulated
+    /// so far so a UI can show it building up during the "识别中..." phase.</summary>
+    public event Action<string>? PartialTranscriptionUpdated;
+
     /// <summary>Raised when starting or stopping the microphone itself fails (e.g. no
     /// microphone present, or it's exclusively held by another app).</summary>
     public event Action<string>? RecordingFailed;
@@ -128,7 +134,8 @@ public sealed class DictationController : IDisposable
 
         try
         {
-            var text = await _engine.TranscribeAsync(samples, _settings.Language);
+            var text = await _engine.TranscribeAsync(samples, _settings.Language,
+                onPartialResult: partial => PartialTranscriptionUpdated?.Invoke(partial));
             Log.Info($"识别结果：\"{text}\"");
             if (string.IsNullOrWhiteSpace(text) || IsNonSpeechMarker(text)) return;
 

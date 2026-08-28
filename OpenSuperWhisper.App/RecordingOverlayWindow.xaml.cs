@@ -59,6 +59,23 @@ public partial class RecordingOverlayWindow : Window
         if (!IsVisible) Show();
     }
 
+    /// <summary>
+    /// F17: called as each Whisper segment comes in while recognizing a just-finished recording
+    /// (see DictationController.PartialTranscriptionUpdated) - replaces the static "识别中..."
+    /// label with the transcript recognized so far, so the user watches the result build up
+    /// instead of staring at an unchanging label for however long recognition takes. The pill
+    /// auto-sizes to its text (SizeToContent="WidthAndHeight"), so growing text shifts its width;
+    /// re-centering after every update keeps it from drifting off from bottom-center.
+    /// </summary>
+    public void UpdatePartialText(string partialText)
+    {
+        if (string.IsNullOrWhiteSpace(partialText)) return;
+        StatusText.Text = partialText;
+        StatusDot.Visibility = Visibility.Collapsed;
+        if (!IsVisible) Show();
+        PositionNearBottomCenter();
+    }
+
     public void HideOverlay()
     {
         if (IsVisible) Hide();

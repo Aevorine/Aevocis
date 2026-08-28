@@ -83,6 +83,12 @@ public partial class App : Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Log.Info($"进程启动，t={StartupStopwatch.ElapsedMilliseconds}ms");
 
+        // F18: idle by default (including during model loading below - that's a one-time cost,
+        // not the repeated "listening" cost this is meant to protect against) so the app stays
+        // out of the way of whatever else is running (a game, a big build); RecordingStarted
+        // above briefly raises this back for the few seconds a dictation is actually in flight.
+        SetIdlePriority();
+
         var settingsStore = new SettingsStore();
         var historyStore = new HistoryStore();
         var termsStore = new TermDictionaryStore();
@@ -147,27 +153,39 @@ public partial class App : Application
         // disappears once the transcript lands. A fallback timer guards against the overlay
         // getting stuck forever on the (silent, by design) early-return paths in
         // DictationController.OnPressEnded - e.g. a too-short tap or a blank-audio result -
-        // where TranscriptionCompleted is never raised.
-        _controller.RecordingStarted += () => Dispatcher.Invoke(() =>
+        // where TranscriptionCompleted is never raised. It's restarted (not just started once)
+        // on every partial-transcript update too, so a long recognition doesn't hit the old
+        // deadline while still visibly making progress - and, per F18, its firing is also the
+        // safety net that guarantees process priority always comes back down even on those same
+        // silent-failure paths (see SetIdlePriority below).
+        _controller.RecordingStarted += () =>
         {
-            _trayIcon.ToolTipText = "超语音 - 正在听...";
-            _overlayHideFallbackTimer?.Stop();
-            _overlayWindow!.ShowListening();
-        });
+            // F18: raise process priority for the "actively working" window (recording through
+            // transcription) so push-to-talk stays snappy even if something else (a game, a big
+            // build) is hogging the CPU; SetIdlePriority below brings it back down the instant
+            // that window ends. Process.PriorityClass isn't a UI call, so no Dispatcher needed.
+            SetBusyPriority();
+            Dispatcher.Invoke(() =>
+            {
+                _trayIcon.ToolTipText = "超语音 - 正在听...";
+                _overlayHideFallbackTimer?.Stop();
+                _overlayWindow!.ShowListening();
+            });
+        };
         _controller.RecordingStopped += () => Dispatcher.Invoke(() =>
         {
             _trayIcon.ToolTipText = "超语音 - 识别中...";
             _overlayWindow!.ShowTranscribing();
-            _overlayHideFallbackTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-            _overlayHideFallbackTimer.Tick += (_, _) =>
-            {
-                _overlayHideFallbackTimer!.Stop();
-                _overlayWindow!.HideOverlay();
-            };
-            _overlayHideFallbackTimer.Start();
+            RestartOverlayHideFallbackTimer();
+        });
+        _controller.PartialTranscriptionUpdated += partial => Dispatcher.Invoke(() =>
+        {
+            _overlayWindow!.UpdatePartialText(partial);
+            RestartOverlayHideFallbackTimer();
         });
         _controller.TranscriptionCompleted += _ =>
         {
+            SetIdlePriority();
             Dispatcher.Invoke(() =>
             {
                 _trayIcon.ToolTipText = "超语音 - 就绪";
@@ -176,13 +194,17 @@ public partial class App : Application
                 _mainWindow.RefreshHistory();
             });
         };
-        _controller.RecordingFailed += reason => Dispatcher.Invoke(() =>
+        _controller.RecordingFailed += reason =>
         {
-            _overlayHideFallbackTimer?.Stop();
-            _overlayWindow!.HideOverlay();
-            _trayIcon.ToolTipText = $"超语音 - {reason}";
-            _trayIcon.ShowBalloonTip("超语音", reason, BalloonIcon.Warning);
-        });
+            SetIdlePriority();
+            Dispatcher.Invoke(() =>
+            {
+                _overlayHideFallbackTimer?.Stop();
+                _overlayWindow!.HideOverlay();
+                _trayIcon.ToolTipText = $"超语音 - {reason}";
+                _trayIcon.ShowBalloonTip("超语音", reason, BalloonIcon.Warning);
+            });
+        };
 
         // One-time notices for anything Load() had to silently paper over before the tray icon
         // existed to tell the user about it.
@@ -358,6 +380,52 @@ public partial class App : Application
             e.ExceptionObject as Exception);
         if (e.ExceptionObject is Exception ex)
             CrashReporter.Write(ex, e.IsTerminating ? "进程级未处理异常（即将终止）" : "进程级未处理异常");
+    }
+
+    /// <summary>
+    /// F18: raises the process priority for the "actively working" window - recording through
+    /// transcription. BelowNormal (idle default) to Normal would already stop this process from
+    /// dragging on foreground-heavy work like a game or a big build; AboveNormal is used instead
+    /// so the few seconds where a real user is actively waiting on push-to-talk stay snappy even
+    /// under contention, without going as far as the OS-level starvation risk of a Realtime/High
+    /// class. Never throws: PriorityClass can fail if the OS denies the change (e.g. restrictive
+    /// job object/sandbox), and a failed priority bump must never take dictation down with it.
+    /// </summary>
+    private static void SetBusyPriority()
+    {
+        try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.AboveNormal; }
+        catch (Exception ex) { Log.Error("提升进程优先级失败（不影响听写本身）", ex); }
+    }
+
+    /// <summary>F18: the idle-default counterpart to SetBusyPriority - see there for why
+    /// BelowNormal, not Normal, is idle here.</summary>
+    private static void SetIdlePriority()
+    {
+        try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; }
+        catch (Exception ex) { Log.Error("恢复进程优先级失败（不影响听写本身）", ex); }
+    }
+
+    /// <summary>
+    /// (Re)arms the overlay's stuck-state recovery timer - see its call sites for why it needs to
+    /// both start fresh after RecordingStopped and restart on every partial-transcript update.
+    /// Also doubles as the F18 safety net: DictationController.OnPressEnded has a couple of
+    /// silent-by-design early-return paths (e.g. a too-short tap, a blank-audio result, or - less
+    /// by design - an exception while stopping the recorder or injecting text) where neither
+    /// TranscriptionCompleted nor RecordingFailed ever fires, which would otherwise leave process
+    /// priority stuck raised indefinitely; this timer already exists to recover the overlay from
+    /// exactly those paths, so it lowers priority back down at the same time.
+    /// </summary>
+    private void RestartOverlayHideFallbackTimer()
+    {
+        _overlayHideFallbackTimer?.Stop();
+        _overlayHideFallbackTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _overlayHideFallbackTimer.Tick += (_, _) =>
+        {
+            _overlayHideFallbackTimer!.Stop();
+            _overlayWindow!.HideOverlay();
+            SetIdlePriority();
+        };
+        _overlayHideFallbackTimer.Start();
     }
 
     private void ToggleMainWindow()
