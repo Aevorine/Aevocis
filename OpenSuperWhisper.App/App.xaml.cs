@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,6 +17,8 @@ namespace OpenSuperWhisper.App;
 public partial class App : Application
 {
     private TaskbarIcon? _trayIcon;
+    private ContextMenu? _trayMenu;
+    private MenuItem? _downloadUpdateItem;
     private DictationController? _controller;
     private MainWindow? _mainWindow;
     private RecordingOverlayWindow? _overlayWindow;
@@ -90,14 +93,18 @@ public partial class App : Application
         settingsItem.Click += (_, _) => ShowSettingsWindow();
         var retryItem = new MenuItem { Header = "重试初始化" };
         retryItem.Click += (_, _) => _ = RetryInitializationAsync(isFirstAttempt: false);
+        var checkUpdateItem = new MenuItem { Header = "检查更新" };
+        checkUpdateItem.Click += (_, _) => _ = CheckForUpdatesAsync(manualTrigger: true);
         var quitItem = new MenuItem { Header = "退出" };
         quitItem.Click += (_, _) => Shutdown();
         menu.Items.Add(showItem);
         menu.Items.Add(settingsItem);
         menu.Items.Add(retryItem);
+        menu.Items.Add(checkUpdateItem);
         menu.Items.Add(new Separator());
         menu.Items.Add(quitItem);
         _trayIcon.ContextMenu = menu;
+        _trayMenu = menu;
 
         // Recording overlay: shows while listening, switches text while recognizing, and
         // disappears once the transcript lands. A fallback timer guards against the overlay
@@ -202,6 +209,72 @@ public partial class App : Application
         }
 
         _trayIcon.ToolTipText = "超语音 - 就绪";
+
+        // Fire-and-forget, best-effort update check - must never delay or block reaching "就绪"
+        // above, and must never surface a failure to the user (see CheckForUpdatesAsync).
+        _ = CheckForUpdatesAsync(manualTrigger: false);
+    }
+
+    /// <summary>
+    /// Checks GitHub's "latest release" API for a newer version than <see cref="AppVersion.Current"/>.
+    /// Silent by design on any failure (network down, GitHub unreachable, malformed response) -
+    /// this app works fully offline, so a failed check is unremarkable and must not interrupt
+    /// anything. When a newer version is found, adds (or refreshes) the "下载新版本" tray menu
+    /// item and shows one balloon tip. <paramref name="manualTrigger"/> additionally shows a
+    /// "已是最新版本" balloon when nothing newer was found, so a manual "检查更新" click from the
+    /// tray menu isn't silently a no-op.
+    /// </summary>
+    private async Task CheckForUpdatesAsync(bool manualTrigger)
+    {
+        var result = await UpdateChecker.CheckAsync();
+        if (result == null) return; // Failure already logged inside UpdateChecker.CheckAsync.
+
+        if (result.IsNewer)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                EnsureDownloadUpdateMenuItem(result.LatestVersion, result.ReleaseHtmlUrl);
+                _trayIcon?.ShowBalloonTip(
+                    "超语音",
+                    $"发现新版本 v{result.LatestVersion}，点击托盘图标菜单里的「下载新版本」查看",
+                    BalloonIcon.Info);
+            });
+        }
+        else if (manualTrigger)
+        {
+            Dispatcher.Invoke(() => _trayIcon?.ShowBalloonTip("超语音", "已是最新版本", BalloonIcon.Info));
+        }
+    }
+
+    /// <summary>
+    /// Inserts the "下载新版本" tray menu item above "显示主界面" the first time a newer version
+    /// is found, or just refreshes its label/target URL on a later check. Never left in the menu
+    /// when no newer version has ever been found.
+    /// </summary>
+    private void EnsureDownloadUpdateMenuItem(string latestVersion, string releaseHtmlUrl)
+    {
+        if (_downloadUpdateItem != null)
+        {
+            _downloadUpdateItem.Header = $"下载新版本 v{latestVersion}";
+            _downloadUpdateItem.Tag = releaseHtmlUrl;
+            return;
+        }
+
+        var item = new MenuItem { Header = $"下载新版本 v{latestVersion}", Tag = releaseHtmlUrl };
+        item.Click += (_, _) =>
+        {
+            if (item.Tag is not string url) return;
+            try
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Log.Error("打开发布页面失败", ex);
+            }
+        };
+        _downloadUpdateItem = item;
+        _trayMenu!.Items.Insert(0, item);
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
