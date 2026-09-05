@@ -20,8 +20,14 @@ namespace OpenSuperWhisper.App;
 public partial class App : Application
 {
     private const string GithubRepoUrl = "https://github.com/Aevorine/Aevocis";
+    private const string InstanceMutexName = @"Local\Aevocis.SingleInstance";
+    private const string ActivateInstanceEventName = @"Local\Aevocis.ActivateExistingInstance";
+
+    private static Mutex? _instanceMutex;
+    private static EventWaitHandle? _activateInstanceEvent;
 
     private TaskbarIcon? _trayIcon;
+    private CancellationTokenSource? _activationListenerCancellation;
     private ContextMenu? _trayMenu;
     private MenuItem? _downloadUpdateItem;
     private DictationController? _controller;
@@ -82,9 +88,36 @@ public partial class App : Application
     private static void Main()
     {
         VelopackApp.Build().Run();
-        var app = new App();
-        app.InitializeComponent();
-        app.Run();
+        if (!AcquireSingleInstance()) return;
+
+        try
+        {
+            var app = new App();
+            app.InitializeComponent();
+            app.Run();
+        }
+        finally
+        {
+            _activateInstanceEvent?.Dispose();
+            _activateInstanceEvent = null;
+            _instanceMutex?.ReleaseMutex();
+            _instanceMutex?.Dispose();
+            _instanceMutex = null;
+        }
+    }
+
+    private static bool AcquireSingleInstance()
+    {
+        _instanceMutex = new Mutex(true, InstanceMutexName, out var createdNew);
+        _activateInstanceEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateInstanceEventName);
+        if (createdNew) return true;
+
+        _activateInstanceEvent.Set();
+        _activateInstanceEvent.Dispose();
+        _activateInstanceEvent = null;
+        _instanceMutex.Dispose();
+        _instanceMutex = null;
+        return false;
     }
 
     public App()
@@ -194,6 +227,7 @@ public partial class App : Application
         _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore, termLearningStore, draftConfirmation, voiceCommandStore, macroStore);
         _mainWindow = new MainWindow(historyStore, settings, ShowSettingsWindow);
         _overlayWindow = new RecordingOverlayWindow();
+        StartActivationListener();
 
         // F07: live waveform on the recording overlay. Subscribed directly on the recorder
         // (not routed through DictationController, which only ever exposes Started/Stopped/
@@ -735,12 +769,31 @@ public partial class App : Application
         }
     }
 
+    private void StartActivationListener()
+    {
+        _activationListenerCancellation = new CancellationTokenSource();
+        var cancellation = _activationListenerCancellation;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var handles = new WaitHandle[] { _activateInstanceEvent!, cancellation.Token.WaitHandle };
+                while (WaitHandle.WaitAny(handles) == 0)
+                    Dispatcher.BeginInvoke(ShowMainWindow);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        });
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         // SystemEvents.UserPreferenceChanged is a static/OS-level event - not unsubscribing would
         // leak this App instance for the lifetime of the process' static event table (harmless
         // for a normal single-instance run that's about to exit anyway, but cheap to do right).
         SystemEvents.UserPreferenceChanged -= OnSystemUserPreferenceChanged;
+        _activationListenerCancellation?.Cancel();
         _overlayHideFallbackTimer?.Stop();
         _controller?.Dispose();
         _toggleWindowHotkey?.Dispose(); // F32
