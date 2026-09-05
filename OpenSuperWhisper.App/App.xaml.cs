@@ -777,9 +777,12 @@ public partial class App : Application
         {
             try
             {
-                var handles = new WaitHandle[] { _activateInstanceEvent!, cancellation.Token.WaitHandle };
-                while (WaitHandle.WaitAny(handles) == 0)
+                while (!cancellation.IsCancellationRequested)
+                {
+                    if (!_activateInstanceEvent!.WaitOne(TimeSpan.FromMilliseconds(250))) continue;
+                    Log.Info("收到重复启动请求，显示主界面");
                     Dispatcher.BeginInvoke(ShowMainWindow);
+                }
             }
             catch (ObjectDisposedException)
             {
