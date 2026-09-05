@@ -23,7 +23,7 @@
     <!-- Real version for the exe's Properties>Details and Task Manager (previously the SDK
          default 1.0.0 was shown regardless of the Velopack release version, which was confusing
          when troubleshooting which release a machine actually runs). -->
-    <Version>1.3.3</Version>
+    <Version>1.3.4</Version>
     <!-- Aevocis rebrand: controls the name Windows shows in the notification pill, Explorer's
          Properties > Details tab, and Task Manager - independent of the exe filename/assembly
          name below (OpenSuperWhisper.App.*), which stays as-is since renaming it would also

@@ -44,11 +44,22 @@ public partial class MainWindow : Window
     /// storage layer for what is, at MaxItems=200, a trivially small list to scan.</summary>
     private void HistorySearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyHistoryFilter();
 
+    /// <summary>
+    /// Re-renders the history list from the store. The ItemsSource is ALWAYS a detached snapshot
+    /// (a fresh List copy) - never the store's own live _items List. HistoryStore mutates that
+    /// list in place (Add on a new dictation) with no INotifyCollectionChanged, so binding the
+    /// ListBox directly to it made WPF's ListCollectionView desync: the generator cached a count
+    /// that no longer matched the real list and threw "ItemsControl is inconsistent with its
+    /// items source" on the next layout pass (observed as an app crash right after the history
+    /// window was shown). A snapshot is immutable once handed to the view, so a mid-layout add
+    /// can never desync it - RefreshHistory() re-snapshots after every dictation lands.
+    /// </summary>
     private void ApplyHistoryFilter()
     {
         var query = HistorySearchBox.Text;
+        // ToList() here is what makes each render independent of the store's live list.
         HistoryList.ItemsSource = string.IsNullOrWhiteSpace(query)
-            ? _history.Items
+            ? _history.Items.ToList()
             : _history.Items.Where(r => r.Text.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
