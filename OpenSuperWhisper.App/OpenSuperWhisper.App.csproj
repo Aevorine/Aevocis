@@ -20,6 +20,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- Aevocis rebrand: controls the name Windows shows in the notification pill, Explorer's
+         Properties > Details tab, and Task Manager - independent of the exe filename/assembly
+         name below (OpenSuperWhisper.App.*), which stays as-is since renaming it would also
+         require updating every packaging/update source reference (vpk pack's mainExe flag,
+         Velopack's GithubSource asset lookup) for no user-visible benefit. -->
+    <Product>Aevocis</Product>
+    <AssemblyTitle>Aevocis</AssemblyTitle>
+    <Company>Aevorine</Company>
     <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
     <!-- F19 开机秒启动: precompiles to native code at publish time so the process doesn't pay
          JIT cost on first run - only takes effect for a self-contained publish with -r win-x64. -->
@@ -43,6 +51,9 @@
     <None Include="Models\sensevoice\LICENSE-MODEL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="Models\punct\model.int8.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="app.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('app.ico')" />
+    <!-- Aevocis brand mark shown in-window (title bar icon, MainWindow header) - separate from
+         app.ico (exe/tray icon) since WPF <Image> needs a raster format, not .ico. -->
+    <Resource Include="Assets\aevocis-logo.png" />
   </ItemGroup>
 
 </Project>

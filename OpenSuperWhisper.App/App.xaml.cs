@@ -18,7 +18,7 @@ namespace OpenSuperWhisper.App;
 
 public partial class App : Application
 {
-    private const string GithubRepoUrl = "https://github.com/Aevorine/OpenSuperWhisper_Windows";
+    private const string GithubRepoUrl = "https://github.com/Aevorine/Aevocis";
 
     private TaskbarIcon? _trayIcon;
     private ContextMenu? _trayMenu;
@@ -206,7 +206,7 @@ public partial class App : Application
 
         _trayIcon = new TaskbarIcon
         {
-            ToolTipText = "超语音 - 正在加载模型...",
+            ToolTipText = "Aevocis - 正在加载模型...",
             Icon = new System.Drawing.Icon(Path.Combine(AppContext.BaseDirectory, "app.ico"))
         };
         _trayIcon.TrayLeftMouseUp += (_, _) =>
@@ -253,14 +253,14 @@ public partial class App : Application
             SetBusyPriority();
             Dispatcher.Invoke(() =>
             {
-                _trayIcon.ToolTipText = "超语音 - 正在听...";
+                _trayIcon.ToolTipText = "Aevocis - 正在听...";
                 _overlayHideFallbackTimer?.Stop();
                 _overlayWindow!.ShowListening();
             });
         };
         _controller.RecordingStopped += () => Dispatcher.Invoke(() =>
         {
-            _trayIcon.ToolTipText = "超语音 - 识别中...";
+            _trayIcon.ToolTipText = "Aevocis - 识别中...";
             _overlayWindow!.ShowTranscribing();
             RestartOverlayHideFallbackTimer();
         });
@@ -274,7 +274,7 @@ public partial class App : Application
             SetIdlePriority();
             Dispatcher.Invoke(() =>
             {
-                _trayIcon.ToolTipText = "超语音 - 就绪";
+                _trayIcon.ToolTipText = "Aevocis - 就绪";
                 _overlayHideFallbackTimer?.Stop();
                 _overlayWindow!.HideOverlay();
                 _mainWindow.RefreshHistory();
@@ -287,8 +287,8 @@ public partial class App : Application
             {
                 _overlayHideFallbackTimer?.Stop();
                 _overlayWindow!.HideOverlay();
-                _trayIcon.ToolTipText = $"超语音 - {reason}";
-                _trayIcon.ShowBalloonTip("超语音", reason, BalloonIcon.Warning);
+                _trayIcon.ToolTipText = $"Aevocis - {reason}";
+                _trayIcon.ShowBalloonTip("Aevocis", reason, BalloonIcon.Warning);
             });
         };
         // F05/F13: a matched voice command or macro also ends the "正在处理" state shown by the
@@ -301,7 +301,7 @@ public partial class App : Application
             SetIdlePriority();
             Dispatcher.Invoke(() =>
             {
-                _trayIcon.ToolTipText = "超语音 - 就绪";
+                _trayIcon.ToolTipText = "Aevocis - 就绪";
                 _overlayHideFallbackTimer?.Stop();
                 _overlayWindow!.HideOverlay();
             });
@@ -310,15 +310,15 @@ public partial class App : Application
         // One-time notices for anything Load() had to silently paper over before the tray icon
         // existed to tell the user about it.
         if (settingsStore.LastLoadWasReset)
-            _trayIcon.ShowBalloonTip("超语音", "设置文件已损坏，已重置为默认值", BalloonIcon.Warning);
+            _trayIcon.ShowBalloonTip("Aevocis", "设置文件已损坏，已重置为默认值", BalloonIcon.Warning);
         if (settingsStore.IsDegraded)
-            _trayIcon.ShowBalloonTip("超语音", "设置文件暂时无法读取（可能被占用），本次使用临时默认设置，不会覆盖原文件", BalloonIcon.Warning);
+            _trayIcon.ShowBalloonTip("Aevocis", "设置文件暂时无法读取（可能被占用），本次使用临时默认设置，不会覆盖原文件", BalloonIcon.Warning);
         if (historyStore.LastLoadWasReset)
-            _trayIcon.ShowBalloonTip("超语音", "历史记录文件已损坏，已重置为空", BalloonIcon.Warning);
+            _trayIcon.ShowBalloonTip("Aevocis", "历史记录文件已损坏，已重置为空", BalloonIcon.Warning);
         if (historyStore.IsDegraded)
-            _trayIcon.ShowBalloonTip("超语音", "历史记录文件暂时无法读取（可能被占用），本次以空历史运行，不会覆盖原文件", BalloonIcon.Warning);
+            _trayIcon.ShowBalloonTip("Aevocis", "历史记录文件暂时无法读取（可能被占用），本次以空历史运行，不会覆盖原文件", BalloonIcon.Warning);
         if (whisperFallbackNotice is not null)
-            _trayIcon.ShowBalloonTip("超语音", whisperFallbackNotice, BalloonIcon.Info);
+            _trayIcon.ShowBalloonTip("Aevocis", whisperFallbackNotice, BalloonIcon.Info);
 
         await RetryInitializationAsync(isFirstAttempt: true);
     }
@@ -334,7 +334,7 @@ public partial class App : Application
     private async Task RetryInitializationAsync(bool isFirstAttempt)
     {
         if (IsReady) return;
-        _trayIcon!.ToolTipText = "超语音 - 正在初始化...";
+        _trayIcon!.ToolTipText = "Aevocis - 正在初始化...";
 
         if (!_engineReady)
         {
@@ -346,11 +346,11 @@ public partial class App : Application
             catch (Exception ex)
             {
                 Log.Error("语音识别模型初始化失败", ex);
-                _trayIcon.ToolTipText = "超语音 - 未就绪（模型加载失败），点击托盘图标重试";
+                _trayIcon.ToolTipText = "Aevocis - 未就绪（模型加载失败），点击托盘图标重试";
                 if (isFirstAttempt)
-                    MessageBox.Show($"语音识别模型加载失败：{ex.Message}\n\n点击托盘图标可重试。", "超语音", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show($"语音识别模型加载失败：{ex.Message}\n\n点击托盘图标可重试。", "Aevocis", MessageBoxButton.OK, MessageBoxImage.Warning);
                 else
-                    _trayIcon.ShowBalloonTip("超语音", "模型加载仍然失败，点击托盘图标可再次重试", BalloonIcon.Warning);
+                    _trayIcon.ShowBalloonTip("Aevocis", "模型加载仍然失败，点击托盘图标可再次重试", BalloonIcon.Warning);
                 return;
             }
         }
@@ -361,16 +361,16 @@ public partial class App : Application
             if (!_hotkeyReady)
             {
                 Log.Error($"全局热键注册失败，Win32 错误码 {_pushToTalkHotkey!.LastWin32Error}");
-                _trayIcon.ToolTipText = "超语音 - 未就绪（热键注册失败），点击托盘图标重试";
+                _trayIcon.ToolTipText = "Aevocis - 未就绪（热键注册失败），点击托盘图标重试";
                 if (isFirstAttempt)
-                    MessageBox.Show("全局热键注册失败（可能与其他程序冲突）。点击托盘图标可重试。", "超语音", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show("全局热键注册失败（可能与其他程序冲突）。点击托盘图标可重试。", "Aevocis", MessageBoxButton.OK, MessageBoxImage.Warning);
                 else
-                    _trayIcon.ShowBalloonTip("超语音", "热键注册仍然失败，点击托盘图标可再次重试", BalloonIcon.Warning);
+                    _trayIcon.ShowBalloonTip("Aevocis", "热键注册仍然失败，点击托盘图标可再次重试", BalloonIcon.Warning);
                 return;
             }
         }
 
-        _trayIcon.ToolTipText = "超语音 - 就绪";
+        _trayIcon.ToolTipText = "Aevocis - 就绪";
         Log.Info($"就绪，t={StartupStopwatch.ElapsedMilliseconds}ms（进程启动到可用听写的总耗时）");
 
         // Fire-and-forget, best-effort update check - must never delay or block reaching "就绪"
@@ -409,14 +409,14 @@ public partial class App : Application
             {
                 EnsureDownloadUpdateMenuItem(update.TargetFullRelease.Version.ToString());
                 _trayIcon?.ShowBalloonTip(
-                    "超语音",
+                    "Aevocis",
                     $"发现新版本 v{update.TargetFullRelease.Version}，点击托盘图标菜单里的「下载新版本」一键更新",
                     BalloonIcon.Info);
             });
         }
         else if (manualTrigger)
         {
-            Dispatcher.Invoke(() => _trayIcon?.ShowBalloonTip("超语音", "已是最新版本", BalloonIcon.Info));
+            Dispatcher.Invoke(() => _trayIcon?.ShowBalloonTip("Aevocis", "已是最新版本", BalloonIcon.Info));
         }
     }
 
@@ -454,15 +454,15 @@ public partial class App : Application
         _downloadingUpdate = true;
         try
         {
-            _trayIcon?.ShowBalloonTip("超语音", "正在下载新版本...", BalloonIcon.Info);
+            _trayIcon?.ShowBalloonTip("Aevocis", "正在下载新版本...", BalloonIcon.Info);
             await _updateManager.DownloadUpdatesAsync(update);
-            _trayIcon?.ShowBalloonTip("超语音", "下载完成，即将重启到新版本", BalloonIcon.Info);
+            _trayIcon?.ShowBalloonTip("Aevocis", "下载完成，即将重启到新版本", BalloonIcon.Info);
             _updateManager.ApplyUpdatesAndRestart(update);
         }
         catch (Exception ex)
         {
             Log.Error("下载或应用更新失败", ex);
-            _trayIcon?.ShowBalloonTip("超语音", $"更新失败：{ex.Message}", BalloonIcon.Error);
+            _trayIcon?.ShowBalloonTip("Aevocis", $"更新失败：{ex.Message}", BalloonIcon.Error);
         }
         finally
         {

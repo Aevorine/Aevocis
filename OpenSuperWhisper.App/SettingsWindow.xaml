@@ -6,6 +6,7 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
         Background="{StaticResource PaperBackground}"
+        Icon="Assets/aevocis-logo.png"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -42,21 +43,17 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
             <TextBlock Text="按住说话热键：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
-            <Button x:Name="HotkeyCaptureButton" Width="160" Height="26" HorizontalAlignment="Left" Click="HotkeyCaptureButton_Click"/>
+            <Button x:Name="HotkeyCaptureButton" Width="160" Height="26" HorizontalAlignment="Left" Click="HotkeyCaptureButton_Click"
+                    ToolTip="点击按钮后按下想用的键即可完成绑定；按 Esc 取消。"/>
         </StackPanel>
 
-        <TextBlock Grid.Row="1" Text="点击按钮后按下想用的键即可完成绑定；按 Esc 取消。"
-                   Foreground="{StaticResource PaperMuted}" FontSize="11" Margin="110,0,0,16"/>
-
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,4">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,16">
             <TextBlock Text="显示/隐藏窗口热键：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
-            <Button x:Name="ToggleHotkeyCaptureButton" Width="160" Height="26" HorizontalAlignment="Left" Click="ToggleHotkeyCaptureButton_Click"/>
+            <Button x:Name="ToggleHotkeyCaptureButton" Width="160" Height="26" HorizontalAlignment="Left" Click="ToggleHotkeyCaptureButton_Click"
+                    ToolTip="任意界面下按这个组合键即可显示/隐藏主界面（等同于左键单击托盘图标），无需先切到本程序；点击按钮后按住想用的组合键即可完成绑定（须至少含一个 Ctrl/Alt/Shift/Win），按 Esc 取消。"/>
         </StackPanel>
-
-        <TextBlock Grid.Row="3" Text="任意界面下按这个组合键即可显示/隐藏主界面（等同于左键单击托盘图标），无需先切到本程序；点击按钮后按住想用的组合键即可完成绑定（须至少含一个 Ctrl/Alt/Shift/Win），按 Esc 取消。"
-                   Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="110,0,0,16"/>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,16">
             <TextBlock Text="识别语言：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>

@@ -192,7 +192,7 @@ public partial class SettingsWindow : Window
         {
             if (!_switchingModel) return;
             e.Cancel = true;
-            MessageBox.Show(this, "识别模型正在切换/下载中，请等它完成后再关闭设置窗口。", "超语音", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "识别模型正在切换/下载中，请等它完成后再关闭设置窗口。", "Aevocis", MessageBoxButton.OK, MessageBoxImage.Information);
         };
     }
 
@@ -372,7 +372,7 @@ public partial class SettingsWindow : Window
         {
             MessageBox.Show(this,
                 $"显示/隐藏窗口热键（{ToggleHotkeyToDisplayName(_pendingToggleModifiers, _pendingToggleVkCode)}）注册失败，可能已被其他程序占用。设置已保存，但该快捷键暂时不会生效，请换一个组合键重试。",
-                "超语音", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "Aevocis", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         _applyModeLive(_settings.PushToTalkMode);
         AutoStart.SetEnabled(_settings.AutoStartWithWindows);
@@ -444,7 +444,7 @@ public partial class SettingsWindow : Window
             ModelStatusTextBlock.Text = $"切换失败：{result.ErrorMessage}";
             MessageBox.Show(this,
                 $"识别引擎/模型切换失败：{result.ErrorMessage}\n\n可以重新点击「保存」重试，或改选其他选项；当前使用的引擎不受影响。",
-                "超语音", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "Aevocis", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -503,11 +503,11 @@ public partial class SettingsWindow : Window
         {
             var terms = new TermDictionaryStore().Load();
             SettingsPortability.Export(dialog.FileName, _settings, terms);
-            MessageBox.Show("设置已导出。", "超语音", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("设置已导出。", "Aevocis", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"导出失败：{ex.Message}", "超语音", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"导出失败：{ex.Message}", "Aevocis", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -542,13 +542,13 @@ public partial class SettingsWindow : Window
             var message = "设置已导入，热键/语言/麦克风等已立即生效。识别模型路径、历史保留期等少数设置需要重启程序才能完全生效。";
             if (!toggleHotkeyOk)
                 message += $"\n\n显示/隐藏窗口热键（{ToggleHotkeyToDisplayName(_settings.ShowHideHotkeyModifier, _settings.ShowHideVirtualKeyCode)}）已被其他程序占用，暂时不会生效，可在设置里换一个组合键。";
-            MessageBox.Show(message, "超语音", MessageBoxButton.OK,
+            MessageBox.Show(message, "Aevocis", MessageBoxButton.OK,
                 toggleHotkeyOk ? MessageBoxImage.Information : MessageBoxImage.Warning);
             Close();
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"导入失败：{ex.Message}", "超语音", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"导入失败：{ex.Message}", "Aevocis", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

@@ -5,7 +5,8 @@
         Height="440" Width="460"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
-        Background="{StaticResource PaperBackground}">
+        Background="{StaticResource PaperBackground}"
+        Icon="Assets/aevocis-logo.png">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

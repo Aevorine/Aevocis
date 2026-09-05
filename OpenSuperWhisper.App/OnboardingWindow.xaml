@@ -1,13 +1,14 @@
 <Window x:Class="OpenSuperWhisper.App.OnboardingWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="欢迎使用超语音"
+        Title="欢迎使用 Aevocis"
         Height="320" Width="420"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Topmost="True"
-        Background="{StaticResource PaperBackground}">
+        Background="{StaticResource PaperBackground}"
+        Icon="Assets/aevocis-logo.png">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -16,7 +17,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="欢迎使用超语音" FontSize="18" FontFamily="Georgia"
+        <TextBlock Grid.Row="0" Text="欢迎使用 Aevocis" FontSize="18" FontFamily="Georgia"
                    Foreground="{StaticResource PaperInk}" Margin="0,0,0,20"/>
 
         <StackPanel Grid.Row="1" VerticalAlignment="Center">
