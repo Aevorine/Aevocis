@@ -108,14 +108,28 @@ public partial class App : Application
 
     private static bool AcquireSingleInstance()
     {
-        _instanceMutex = new Mutex(true, InstanceMutexName, out var createdNew);
+        var createdNew = false;
+        try
+        {
+            _instanceMutex = new Mutex(true, InstanceMutexName, out createdNew);
+        }
+        catch (AbandonedMutexException)
+        {
+            // The previous instance died without releasing the mutex (a crash - see
+            // CrashReporter). The OS has transferred ownership of the abandoned mutex to this
+            // thread, so there is no live instance left to signal: treat this launch as the
+            // primary one instead of throwing out of Main (which would make the app unbootable
+            // after any crash). The handle was never returned by the throwing constructor, so
+            // nothing to release here - the OS reclaims it when this process exits.
+            createdNew = true;
+        }
         _activateInstanceEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateInstanceEventName);
         if (createdNew) return true;
 
         _activateInstanceEvent.Set();
         _activateInstanceEvent.Dispose();
         _activateInstanceEvent = null;
-        _instanceMutex.Dispose();
+        _instanceMutex?.Dispose();
         _instanceMutex = null;
         return false;
     }
