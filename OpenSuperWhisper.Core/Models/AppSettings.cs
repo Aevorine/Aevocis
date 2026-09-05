@@ -71,4 +71,21 @@ public sealed class AppSettings
     /// to false so existing users see no behavior change (still "recognize -> type immediately")
     /// until they opt in.</summary>
     public bool ShowDraftBeforeInject { get; set; } = false;
+
+    /// <summary>F32: Win32 MOD_* flags (see OpenSuperWhisper.Hotkeys.GlobalToggleWindowHotkey's
+    /// ModControl/ModAlt/ModShift/ModWin re-exports, or winuser.h) for the dedicated show/hide
+    /// main window hotkey - kept as a plain int here, not a Hotkeys-project type, because Core
+    /// must not depend on Hotkeys (Hotkeys already depends on Core; a reverse reference would be
+    /// circular). Default 0x0003 = MOD_CONTROL (0x2) | MOD_ALT (0x1), i.e. Ctrl+Alt - chosen
+    /// together with <see cref="ShowHideVirtualKeyCode"/> below for Ctrl+Alt+H.</summary>
+    public int ShowHideHotkeyModifier { get; set; } = 0x0003;
+
+    /// <summary>F32: the non-modifier key for the show/hide hotkey, as a Win32 VK_* code. Default
+    /// 0x48 = VK_H ("H" for 隐藏/显示 - hide/show) - chosen because Ctrl+Alt+H is not reserved by
+    /// Windows itself (unlike e.g. Ctrl+Alt+Del/Esc/Tab/Arrows) nor by any of this app's other
+    /// stated target apps (VSCode, Word, browsers, WeChat, mail) in their default keymaps, so it
+    /// is unlikely to collide with something the user already relies on. If RegisterHotKey still
+    /// reports it as taken by some other running app (see GlobalToggleWindowHotkey.LastWin32Error),
+    /// the user can rebind it in Settings the same way as the push-to-talk key.</summary>
+    public int ShowHideVirtualKeyCode { get; set; } = 0x48;
 }

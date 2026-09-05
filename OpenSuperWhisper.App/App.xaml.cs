@@ -33,6 +33,10 @@ public partial class App : Application
     private VoiceCommandStore? _voiceCommandStore;
     private MacroStore? _macroStore;
     private GlobalPushToTalkHotkey? _pushToTalkHotkey;
+    // F32: independent global hotkey - show/hide the main window from anywhere, wired up
+    // alongside _pushToTalkHotkey but otherwise unrelated to it (see GlobalToggleWindowHotkey's
+    // doc comment for why it needs a different underlying Win32 mechanism).
+    private GlobalToggleWindowHotkey? _toggleWindowHotkey;
     // v1.2.0 双引擎：DictationController 拿到的是这个切换器（ITranscriptionEngine），真实引擎
     // （闪电/SenseVoice 或 Whisper）由 SwitchEngineAsync 在里面热插拔，控制器无感知。
     private EngineSwitcher? _engine;
@@ -181,6 +185,16 @@ public partial class App : Application
         _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore, draftConfirmation, voiceCommandStore, macroStore);
         _mainWindow = new MainWindow(historyStore, settings, ShowSettingsWindow);
         _overlayWindow = new RecordingOverlayWindow();
+
+        // F32: unlike push-to-talk, this doesn't need the recognition engine to be ready (see
+        // RetryInitializationAsync's _hotkeyReady gate below) - showing/hiding the window has no
+        // dependency on the model at all, so it's registered right away instead of being held
+        // back until "就绪". _mainWindow above must exist first since ToggleMainWindow reads it.
+        var toggleWindowHotkey = new GlobalToggleWindowHotkey(settings.ShowHideHotkeyModifier, settings.ShowHideVirtualKeyCode);
+        _toggleWindowHotkey = toggleWindowHotkey;
+        toggleWindowHotkey.Pressed += ToggleMainWindow;
+        if (!toggleWindowHotkey.Start())
+            Log.Error($"显示/隐藏窗口全局热键注册失败，Win32 错误码 {toggleWindowHotkey.LastWin32Error}（可能与其他程序冲突，可在设置里换一个组合键）");
 
         _trayIcon = new TaskbarIcon
         {
@@ -532,6 +546,7 @@ public partial class App : Application
             vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk),
             appHotkeys => _pushToTalkHotkey!.SetAppSpecificHotkeys(appHotkeys), // F12
             mode => _pushToTalkHotkey!.SetMode(mode), // F09
+            (mods, vk) => _toggleWindowHotkey!.SetHotkey(mods, vk), // F32
             SwitchModelAsync, // F01
             SwitchEngineAsync); // v1.2.0 双引擎
         window.ShowDialog();
@@ -668,6 +683,7 @@ public partial class App : Application
     {
         _overlayHideFallbackTimer?.Stop();
         _controller?.Dispose();
+        _toggleWindowHotkey?.Dispose(); // F32
         _trayIcon?.Dispose();
         base.OnExit(e);
     }

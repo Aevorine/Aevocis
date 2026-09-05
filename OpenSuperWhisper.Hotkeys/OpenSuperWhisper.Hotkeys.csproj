@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- F32: GlobalToggleWindowHotkey needs System.Windows.Interop.HwndSource for its message-only
+         hotkey-sink window. This project's only consumer is the WPF app (OpenSuperWhisper.App),
+         which already loads the WPF assemblies in-process, so this adds no real runtime cost. -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>

@@ -8,6 +8,7 @@ using Microsoft.Win32;
 using OpenSuperWhisper.Audio;
 using OpenSuperWhisper.Core;
 using OpenSuperWhisper.Core.Models;
+using OpenSuperWhisper.Hotkeys;
 using OpenSuperWhisper.Recognition;
 using OpenSuperWhisper.Storage;
 
@@ -79,11 +80,18 @@ public partial class SettingsWindow : Window
     private readonly Action<int> _applyHotkeyLive;
     private readonly Action<Dictionary<string, int>> _applyAppHotkeysLive;
     private readonly Action<PushToTalkMode> _applyModeLive;
+    private readonly Func<int, int, bool> _applyToggleHotkeyLive;
     private readonly Func<ModelOption, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> _switchModel;
     private readonly Func<string, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> _switchEngine;
 
     private bool _capturingHotkey;
     private int _pendingVkCode;
+    // F32: show/hide window hotkey capture - separate pending state from the push-to-talk key
+    // above since the two capture flows run independently (only one can be "listening" at a time,
+    // enforced in Window_PreviewKeyDown) and this one also needs a modifier mask, not just a key.
+    private bool _capturingToggleHotkey;
+    private int _pendingToggleModifiers;
+    private int _pendingToggleVkCode;
     private bool _switchingModel;
     private readonly DispatcherTimer _resourceUsageTimer;
     private TimeSpan _lastCpuTime;
@@ -97,6 +105,7 @@ public partial class SettingsWindow : Window
         Action<int> applyHotkeyLive,
         Action<Dictionary<string, int>> applyAppHotkeysLive,
         Action<PushToTalkMode> applyModeLive,
+        Func<int, int, bool> applyToggleHotkeyLive,
         Func<ModelOption, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> switchModel,
         Func<string, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> switchEngine)
     {
@@ -108,11 +117,17 @@ public partial class SettingsWindow : Window
         _applyHotkeyLive = applyHotkeyLive;
         _applyAppHotkeysLive = applyAppHotkeysLive;
         _applyModeLive = applyModeLive;
+        _applyToggleHotkeyLive = applyToggleHotkeyLive;
         _switchModel = switchModel;
         _switchEngine = switchEngine;
 
         _pendingVkCode = settings.PushToTalkVirtualKeyCode;
         HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
+
+        // F32
+        _pendingToggleModifiers = settings.ShowHideHotkeyModifier;
+        _pendingToggleVkCode = settings.ShowHideVirtualKeyCode;
+        ToggleHotkeyCaptureButton.Content = ToggleHotkeyToDisplayName(_pendingToggleModifiers, _pendingToggleVkCode);
 
         AppPromptsTextBox.Text = FormatAppSpecificPrompts(settings.AppSpecificPrompts);
         AppHotkeysTextBox.Text = FormatAppSpecificHotkeys(settings.AppSpecificHotkeys);
@@ -214,26 +229,100 @@ public partial class SettingsWindow : Window
         HotkeyCaptureButton.Content = "请按下按键...";
     }
 
+    /// <summary>F32: starts capturing the show/hide combo - see ToggleHotkey_PreviewKeyDownCapture
+    /// below for why this needs a modifier+key combo rather than a bare key.</summary>
+    private void ToggleHotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
+    {
+        _capturingToggleHotkey = true;
+        ToggleHotkeyCaptureButton.Content = "请按住 Ctrl/Alt/Shift/Win 并按下主键...";
+    }
+
     /// <summary>
-    /// Handles the "press the key you want" capture. Wired at the window level (not just the
-    /// button) so it tunnels down regardless of which control currently has keyboard focus.
+    /// Handles the "press the key you want" capture for both hotkeys. Wired at the window level
+    /// (not just the button) so it tunnels down regardless of which control currently has
+    /// keyboard focus. At most one of _capturingHotkey/_capturingToggleHotkey is ever true at a
+    /// time - starting either capture doesn't clear the other explicitly, but a user physically
+    /// can't be mid-capture on both controls at once (clicking the second button to start its
+    /// capture already moved focus away, and neither click handler needs the old capture to have
+    /// finished first since they just overwrite whichever flag they own).
     /// </summary>
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (!_capturingHotkey) return;
-        e.Handled = true;
-
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        if (key == Key.Escape)
+        if (_capturingHotkey)
         {
+            e.Handled = true;
+
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key == Key.Escape)
+            {
+                _capturingHotkey = false;
+                HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
+                return;
+            }
+
+            _pendingVkCode = KeyInterop.VirtualKeyFromKey(key);
             _capturingHotkey = false;
             HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
             return;
         }
 
-        _pendingVkCode = KeyInterop.VirtualKeyFromKey(key);
-        _capturingHotkey = false;
-        HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
+        if (_capturingToggleHotkey)
+            ToggleHotkey_PreviewKeyDownCapture(e);
+    }
+
+    /// <summary>F32 capture logic: unlike the push-to-talk key (a bare key is fine there - it's
+    /// only ever read while explicitly held down), the show/hide hotkey is a system-wide
+    /// RegisterHotKey registration that intercepts the key everywhere, all the time, the instant
+    /// it's bound - so a bare, unmodified key (e.g. just "H") would silently break normal typing
+    /// of that character in every app. At least one modifier is therefore required; a key-down
+    /// for a modifier key by itself (still waiting for the user to also tap a main key) does not
+    /// finish the capture, it just keeps listening.</summary>
+    private void ToggleHotkey_PreviewKeyDownCapture(KeyEventArgs e)
+    {
+        e.Handled = true;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+
+        if (key == Key.Escape)
+        {
+            _capturingToggleHotkey = false;
+            ToggleHotkeyCaptureButton.Content = ToggleHotkeyToDisplayName(_pendingToggleModifiers, _pendingToggleVkCode);
+            return;
+        }
+
+        if (IsModifierKey(key))
+            return; // still waiting for the non-modifier "main" key
+
+        var modifiers = CurrentModifierFlags();
+        if (modifiers == 0)
+        {
+            ToggleHotkeyCaptureButton.Content = "至少要按住一个 Ctrl/Alt/Shift/Win，请重试...";
+            return; // don't finish the capture on a bare key - see summary above
+        }
+
+        _pendingToggleModifiers = modifiers;
+        _pendingToggleVkCode = KeyInterop.VirtualKeyFromKey(key);
+        _capturingToggleHotkey = false;
+        ToggleHotkeyCaptureButton.Content = ToggleHotkeyToDisplayName(_pendingToggleModifiers, _pendingToggleVkCode);
+    }
+
+    private static bool IsModifierKey(Key key) => key is
+        Key.LeftCtrl or Key.RightCtrl or
+        Key.LeftAlt or Key.RightAlt or
+        Key.LeftShift or Key.RightShift or
+        Key.LWin or Key.RWin or
+        Key.System or Key.None;
+
+    /// <summary>Reads which modifiers are physically down right now (during a key-down capture),
+    /// as Win32 MOD_* flags. Deliberately queries live keyboard state (Keyboard.IsKeyDown) rather
+    /// than Keyboard.Modifiers, because the latter doesn't track the Windows key at all.</summary>
+    private static int CurrentModifierFlags()
+    {
+        uint mods = 0;
+        if (Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl)) mods |= GlobalToggleWindowHotkey.ModControl;
+        if (Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt)) mods |= GlobalToggleWindowHotkey.ModAlt;
+        if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift)) mods |= GlobalToggleWindowHotkey.ModShift;
+        if (Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin)) mods |= GlobalToggleWindowHotkey.ModWin;
+        return (int)mods;
     }
 
     /// <summary>
@@ -259,6 +348,8 @@ public partial class SettingsWindow : Window
         _settings.AppSpecificHotkeys = ParseAppSpecificHotkeys(AppHotkeysTextBox.Text);
         _settings.PushToTalkMode = ToggleModeRadioButton.IsChecked == true ? PushToTalkMode.Toggle : PushToTalkMode.Hold;
         _settings.ShowDraftBeforeInject = ShowDraftBeforeInjectCheckBox.IsChecked == true;
+        _settings.ShowHideHotkeyModifier = _pendingToggleModifiers; // F32
+        _settings.ShowHideVirtualKeyCode = _pendingToggleVkCode;
 
         var selectedEngine = ((EngineOption)EngineComboBox.SelectedItem).Key;
         var engineChanged = selectedEngine != _settings.RecognitionEngine;
@@ -270,6 +361,19 @@ public partial class SettingsWindow : Window
         _macroStore.Save(VoiceMacroTextFormat.Parse(MacrosTextBox.Text));
         _applyHotkeyLive(_pendingVkCode);
         _applyAppHotkeysLive(_settings.AppSpecificHotkeys);
+        // F32: unlike the push-to-talk key above (a keyboard hook, which can't be "already taken"
+        // by another app), RegisterHotKey can fail here if some other running application already
+        // owns the exact combo just chosen - that failure must be surfaced immediately rather
+        // than silently leaving the old combo (or nothing) active behind the user's back (see
+        // GlobalToggleWindowHotkey.SetHotkey's doc comment). The setting itself is still saved as
+        // chosen either way - it's what the user picked, and a later rebind or the other app
+        // closing could make it work without needing to visit Settings again.
+        if (!_applyToggleHotkeyLive(_pendingToggleModifiers, _pendingToggleVkCode))
+        {
+            MessageBox.Show(this,
+                $"显示/隐藏窗口热键（{ToggleHotkeyToDisplayName(_pendingToggleModifiers, _pendingToggleVkCode)}）注册失败，可能已被其他程序占用。设置已保存，但该快捷键暂时不会生效，请换一个组合键重试。",
+                "超语音", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
         _applyModeLive(_settings.PushToTalkMode);
         AutoStart.SetEnabled(_settings.AutoStartWithWindows);
 
@@ -355,6 +459,7 @@ public partial class SettingsWindow : Window
         LanguageComboBox.IsEnabled = enabled;
         MicrophoneComboBox.IsEnabled = enabled;
         HotkeyCaptureButton.IsEnabled = enabled;
+        ToggleHotkeyCaptureButton.IsEnabled = enabled; // F32
         AutoStartCheckBox.IsEnabled = enabled;
         AutocorrectPunctuationCheckBox.IsEnabled = enabled;
         HistoryRetentionComboBox.IsEnabled = enabled;
@@ -431,10 +536,14 @@ public partial class SettingsWindow : Window
             _applyHotkeyLive(_settings.PushToTalkVirtualKeyCode);
             _applyAppHotkeysLive(_settings.AppSpecificHotkeys);
             _applyModeLive(_settings.PushToTalkMode);
+            // F32: same "surface the conflict, don't silently swallow it" reasoning as SaveButton_Click.
+            var toggleHotkeyOk = _applyToggleHotkeyLive(_settings.ShowHideHotkeyModifier, _settings.ShowHideVirtualKeyCode);
             AutoStart.SetEnabled(_settings.AutoStartWithWindows);
-            MessageBox.Show(
-                "设置已导入，热键/语言/麦克风等已立即生效。识别模型路径、历史保留期等少数设置需要重启程序才能完全生效。",
-                "超语音", MessageBoxButton.OK, MessageBoxImage.Information);
+            var message = "设置已导入，热键/语言/麦克风等已立即生效。识别模型路径、历史保留期等少数设置需要重启程序才能完全生效。";
+            if (!toggleHotkeyOk)
+                message += $"\n\n显示/隐藏窗口热键（{ToggleHotkeyToDisplayName(_settings.ShowHideHotkeyModifier, _settings.ShowHideVirtualKeyCode)}）已被其他程序占用，暂时不会生效，可在设置里换一个组合键。";
+            MessageBox.Show(message, "超语音", MessageBoxButton.OK,
+                toggleHotkeyOk ? MessageBoxImage.Information : MessageBoxImage.Warning);
             Close();
         }
         catch (Exception ex)
@@ -457,6 +566,8 @@ public partial class SettingsWindow : Window
         to.AppSpecificHotkeys = from.AppSpecificHotkeys;
         to.PushToTalkMode = from.PushToTalkMode;
         to.ShowDraftBeforeInject = from.ShowDraftBeforeInject;
+        to.ShowHideHotkeyModifier = from.ShowHideHotkeyModifier; // F32
+        to.ShowHideVirtualKeyCode = from.ShowHideVirtualKeyCode;
     }
 
     /// <summary>F06 quick-add: appends the tapped preset as a new "进程名|提示词" line, unless
@@ -473,6 +584,22 @@ public partial class SettingsWindow : Window
         var current = AppPromptsTextBox.Text.TrimEnd('\r', '\n');
         AppPromptsTextBox.Text = current.Length == 0 ? $"{process}|{prompt}" : $"{current}{Environment.NewLine}{process}|{prompt}";
         AppPromptsTextBox.CaretIndex = AppPromptsTextBox.Text.Length;
+    }
+
+    /// <summary>F32: "Ctrl+Alt+H"-style display for the show/hide combo - modifiers in a fixed
+    /// Ctrl/Alt/Shift/Win order (matches the conventional Windows shortcut notation regardless of
+    /// which order the user physically pressed them in) followed by VkToDisplayName's rendering
+    /// of the main key.</summary>
+    private static string ToggleHotkeyToDisplayName(int modifiers, int vk)
+    {
+        var mods = (uint)modifiers;
+        var parts = new List<string>();
+        if ((mods & GlobalToggleWindowHotkey.ModControl) != 0) parts.Add("Ctrl");
+        if ((mods & GlobalToggleWindowHotkey.ModAlt) != 0) parts.Add("Alt");
+        if ((mods & GlobalToggleWindowHotkey.ModShift) != 0) parts.Add("Shift");
+        if ((mods & GlobalToggleWindowHotkey.ModWin) != 0) parts.Add("Win");
+        parts.Add(VkToDisplayName(vk));
+        return string.Join("+", parts);
     }
 
     private static string VkToDisplayName(int vk)
