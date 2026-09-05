@@ -35,12 +35,14 @@ public sealed class MicRecorder : IAudioRecorder
         private readonly WaveInEvent _waveIn;
         private readonly List<byte> _buffer = new();
         private readonly object _lock = new();
+        private readonly Action<float>? _onLevel;
 
         public string DeviceName { get; }
 
-        public SingleCapture(int deviceIndex, string deviceName)
+        public SingleCapture(int deviceIndex, string deviceName, Action<float>? onLevel)
         {
             DeviceName = deviceName;
+            _onLevel = onLevel;
             _waveIn = new WaveInEvent
             {
                 DeviceNumber = deviceIndex,
@@ -55,10 +57,29 @@ public sealed class MicRecorder : IAudioRecorder
         {
             lock (_lock)
             {
-                if (_buffer.Count >= MaxBufferBytes) return;
-                var count = Math.Min(e.BytesRecorded, MaxBufferBytes - _buffer.Count);
-                for (int i = 0; i < count; i++)
-                    _buffer.Add(e.Buffer[i]);
+                if (_buffer.Count < MaxBufferBytes)
+                {
+                    var count = Math.Min(e.BytesRecorded, MaxBufferBytes - _buffer.Count);
+                    for (int i = 0; i < count; i++)
+                        _buffer.Add(e.Buffer[i]);
+                }
+            }
+
+            // F07: live level for the recording overlay's waveform - computed straight off this
+            // chunk's raw bytes (not the accumulated _buffer), so it costs nothing extra and never
+            // touches the lock above longer than necessary. Deliberately best-effort: if nobody is
+            // listening (_onLevel null, e.g. no overlay wired up) this is skipped entirely.
+            if (_onLevel is not null && e.BytesRecorded >= 2)
+            {
+                double sumSquares = 0;
+                int sampleCount = e.BytesRecorded / 2;
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    short s = (short)(e.Buffer[i * 2] | (e.Buffer[i * 2 + 1] << 8));
+                    double normalized = s / 32768.0;
+                    sumSquares += normalized * normalized;
+                }
+                _onLevel((float)Math.Sqrt(sumSquares / sampleCount));
             }
         }
 
@@ -85,6 +106,11 @@ public sealed class MicRecorder : IAudioRecorder
 
     private readonly List<SingleCapture> _captures = new();
 
+    /// <summary>F07: see IAudioRecorder.LevelChanged. Raised from whichever capture's NAudio
+    /// callback thread fires first - never marshaled to the UI thread here, that's the
+    /// subscriber's job (same contract as the interface doc).</summary>
+    public event Action<float>? LevelChanged;
+
     public void Start(string? microphoneDeviceId)
     {
         _captures.Clear();
@@ -93,7 +119,7 @@ public sealed class MicRecorder : IAudioRecorder
         {
             try
             {
-                _captures.Add(new SingleCapture(index, name));
+                _captures.Add(new SingleCapture(index, name, level => LevelChanged?.Invoke(level)));
             }
             catch (Exception ex) when (_captures.Count > 0)
             {

@@ -186,6 +186,14 @@ public partial class App : Application
         _mainWindow = new MainWindow(historyStore, settings, ShowSettingsWindow);
         _overlayWindow = new RecordingOverlayWindow();
 
+        // F07: live waveform on the recording overlay. Subscribed directly on the recorder
+        // (not routed through DictationController, which only ever exposes Started/Stopped/
+        // TranscriptionCompleted-shaped events) so the overlay's per-chunk visual update has zero
+        // effect on the actual dictation pipeline. LevelChanged fires on a NAudio capture thread -
+        // BeginInvoke (not Invoke) so a burst of updates never makes the audio callback wait on
+        // the UI thread.
+        recorder.LevelChanged += level => Dispatcher.BeginInvoke(() => _overlayWindow?.UpdateLevel(level));
+
         // F32: unlike push-to-talk, this doesn't need the recognition engine to be ready (see
         // RetryInitializationAsync's _hotkeyReady gate below) - showing/hiding the window has no
         // dependency on the model at all, so it's registered right away instead of being held

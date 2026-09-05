@@ -17,6 +17,18 @@
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource PaperAccent}"
                      Margin="0,0,8,0" VerticalAlignment="Center"/>
+            <!-- F07: live waveform - 5 bars whose height reacts to mic input level while
+                 listening (see RecordingOverlayWindow.UpdateLevel). Hidden outside the
+                 "正在听..." phase; StatusDot is the fallback shown before the first level
+                 sample arrives or if the mic ever reports zero levels. -->
+            <StackPanel x:Name="WaveformBars" Orientation="Horizontal" VerticalAlignment="Center"
+                        Height="16" Margin="0,0,8,0" Visibility="Collapsed">
+                <Rectangle x:Name="Bar0" Width="3" Height="3" Fill="{StaticResource PaperAccent}" Margin="0,0,2,0" VerticalAlignment="Center" RadiusX="1.5" RadiusY="1.5"/>
+                <Rectangle x:Name="Bar1" Width="3" Height="3" Fill="{StaticResource PaperAccent}" Margin="0,0,2,0" VerticalAlignment="Center" RadiusX="1.5" RadiusY="1.5"/>
+                <Rectangle x:Name="Bar2" Width="3" Height="3" Fill="{StaticResource PaperAccent}" Margin="0,0,2,0" VerticalAlignment="Center" RadiusX="1.5" RadiusY="1.5"/>
+                <Rectangle x:Name="Bar3" Width="3" Height="3" Fill="{StaticResource PaperAccent}" Margin="0,0,2,0" VerticalAlignment="Center" RadiusX="1.5" RadiusY="1.5"/>
+                <Rectangle x:Name="Bar4" Width="3" Height="3" Fill="{StaticResource PaperAccent}" VerticalAlignment="Center" RadiusX="1.5" RadiusY="1.5"/>
+            </StackPanel>
             <TextBlock x:Name="StatusText" Text="正在听..." Foreground="{StaticResource PaperInk}"
                        FontSize="13" FontFamily="Segoe UI" VerticalAlignment="Center"
                        MaxWidth="480" TextWrapping="Wrap"/>

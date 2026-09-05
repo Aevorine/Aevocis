@@ -36,7 +36,14 @@
             </DockPanel>
         </Border>
 
-        <TextBlock DockPanel.Dock="Top" Text="最近" FontSize="11" Foreground="{StaticResource PaperMuted}" Margin="16,10,0,4"/>
+        <DockPanel DockPanel.Dock="Top" Margin="16,10,16,6">
+            <TextBlock Text="最近" FontSize="11" Foreground="{StaticResource PaperMuted}"
+                       DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <!-- F10: live substring filter over history text (see MainWindow.ApplyHistoryFilter). -->
+            <TextBox x:Name="HistorySearchBox" FontSize="12" Padding="6,3" VerticalContentAlignment="Center"
+                     Background="{StaticResource PaperSurface}" Foreground="{StaticResource PaperInk}"
+                     BorderBrush="{StaticResource PaperBorder}" TextChanged="HistorySearchBox_TextChanged"/>
+        </DockPanel>
 
         <ListBox x:Name="HistoryList" BorderThickness="0" Background="Transparent" Margin="8,0,8,8">
             <ListBox.ItemTemplate>
