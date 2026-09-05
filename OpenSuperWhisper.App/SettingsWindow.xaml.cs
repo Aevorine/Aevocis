@@ -26,6 +26,16 @@ public partial class SettingsWindow : Window
 {
     private sealed record LanguageOption(string Display, string Value);
     private sealed record RetentionOption(string Display, int Days);
+    private sealed record EngineOption(string Display, string Key);
+
+    /// <summary>v1.2.0 双引擎。实测对比见 TECH_ROADMAP.md §2：闪电（SenseVoice int8）6 秒音频
+    /// 约 0.2 秒出字、识别峰值内存约 340MB、中文更准；Whisper 支持 99 种语言但慢且吃内存，
+    /// 模型按需下载。</summary>
+    private static readonly EngineOption[] EngineOptions =
+    {
+        new("闪电（中文/中英混合，快，省内存，推荐）", "sensevoice"),
+        new("Whisper（多语种，较慢，模型按需下载）", "whisper"),
+    };
 
     private static readonly LanguageOption[] LanguageOptions =
     {
@@ -49,7 +59,7 @@ public partial class SettingsWindow : Window
     /// <summary>Id "" is the sentinel for automatic selection (prefer whichever headset/etc.
     /// was most recently connected, fall back to the built-in mic) - not a real device, always
     /// the first option.</summary>
-    private static readonly MicrophoneDevices.Info FollowSystemDefault = new("", "自动（优先刚连接的耳机等设备）");
+    private static readonly MicrophoneDevices.Info FollowSystemDefault = new("", "自动（内置与新接耳机双路同录，自动选优）");
 
     /// <summary>F06: quick-add buttons for the recommended presets from the original ask
     /// (WeChat/VSCode/Claude Code) - offered in the UI as opt-in suggestions, not written into
@@ -70,6 +80,7 @@ public partial class SettingsWindow : Window
     private readonly Action<Dictionary<string, int>> _applyAppHotkeysLive;
     private readonly Action<PushToTalkMode> _applyModeLive;
     private readonly Func<ModelOption, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> _switchModel;
+    private readonly Func<string, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> _switchEngine;
 
     private bool _capturingHotkey;
     private int _pendingVkCode;
@@ -86,7 +97,8 @@ public partial class SettingsWindow : Window
         Action<int> applyHotkeyLive,
         Action<Dictionary<string, int>> applyAppHotkeysLive,
         Action<PushToTalkMode> applyModeLive,
-        Func<ModelOption, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> switchModel)
+        Func<ModelOption, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> switchModel,
+        Func<string, IProgress<ModelDownloadProgress>?, Task<(bool Success, string? ErrorMessage)>> switchEngine)
     {
         InitializeComponent();
         _settings = settings;
@@ -97,6 +109,7 @@ public partial class SettingsWindow : Window
         _applyAppHotkeysLive = applyAppHotkeysLive;
         _applyModeLive = applyModeLive;
         _switchModel = switchModel;
+        _switchEngine = switchEngine;
 
         _pendingVkCode = settings.PushToTalkVirtualKeyCode;
         HotkeyCaptureButton.Content = VkToDisplayName(_pendingVkCode);
@@ -122,8 +135,13 @@ public partial class SettingsWindow : Window
         MicrophoneComboBox.SelectedItem = micOptions.FirstOrDefault(o => o.Id == settings.MicrophoneDeviceId)
                                            ?? FollowSystemDefault;
 
+        EngineComboBox.ItemsSource = EngineOptions;
+        EngineComboBox.SelectedItem = EngineOptions.FirstOrDefault(o => o.Key == settings.RecognitionEngine)
+                                       ?? EngineOptions[0];
+
         ModelComboBox.ItemsSource = ModelCatalog.All;
         ModelComboBox.SelectedItem = ModelCatalog.Resolve(settings.ModelSize);
+        UpdateWhisperModelRowVisibility();
 
         AutoStartCheckBox.IsChecked = AutoStart.IsEnabled();
         AutocorrectPunctuationCheckBox.IsChecked = settings.AutocorrectPunctuation;
@@ -179,6 +197,17 @@ public partial class SettingsWindow : Window
         ResourceUsageTextBlock.Text = $"占用：内存 {memoryMb:F0} MB · CPU {cpuPercent:F1}%";
     }
 
+    /// <summary>Whisper 模型下拉只在选了 Whisper 引擎时展示——闪电引擎的模型随安装包捆绑，
+    /// 没有可选项，露着只会让人疑惑"这个下拉对闪电有没有用"。</summary>
+    private void UpdateWhisperModelRowVisibility()
+    {
+        if (WhisperModelRow is null || EngineComboBox.SelectedItem is not EngineOption option) return;
+        WhisperModelRow.Visibility = option.Key == "whisper" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void EngineComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => UpdateWhisperModelRowVisibility();
+
     private void HotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
     {
         _capturingHotkey = true;
@@ -231,6 +260,8 @@ public partial class SettingsWindow : Window
         _settings.PushToTalkMode = ToggleModeRadioButton.IsChecked == true ? PushToTalkMode.Toggle : PushToTalkMode.Hold;
         _settings.ShowDraftBeforeInject = ShowDraftBeforeInjectCheckBox.IsChecked == true;
 
+        var selectedEngine = ((EngineOption)EngineComboBox.SelectedItem).Key;
+        var engineChanged = selectedEngine != _settings.RecognitionEngine;
         var selectedModel = (ModelOption)ModelComboBox.SelectedItem;
         var modelChanged = selectedModel.Key != _settings.ModelSize;
 
@@ -242,7 +273,7 @@ public partial class SettingsWindow : Window
         _applyModeLive(_settings.PushToTalkMode);
         AutoStart.SetEnabled(_settings.AutoStartWithWindows);
 
-        if (!modelChanged)
+        if (!engineChanged && !modelChanged)
         {
             Close();
             return;
@@ -250,27 +281,49 @@ public partial class SettingsWindow : Window
 
         _switchingModel = true;
         SetControlsEnabled(false);
-        ModelStatusTextBlock.Text = selectedModel.Bundled
-            ? "正在切换模型..."
-            : $"正在切换模型（本地没有的话会先下载，约 {selectedModel.ApproxSizeDisplay}，请勿关闭窗口）...";
 
         var progress = new Progress<ModelDownloadProgress>(p =>
         {
             ModelStatusTextBlock.Text = p.TotalBytesApprox > 0
-                ? $"正在下载 {selectedModel.DisplayName}：{p.BytesDownloaded / (1024.0 * 1024):F0} MB / 约 {selectedModel.ApproxSizeDisplay}（{p.PercentApprox:F0}%）"
-                : $"正在下载 {selectedModel.DisplayName}：{p.BytesDownloaded / (1024.0 * 1024):F0} MB";
+                ? $"正在下载模型：{p.BytesDownloaded / (1024.0 * 1024):F0} MB / 约 {p.TotalBytesApprox / (1024.0 * 1024):F0} MB（{p.PercentApprox:F0}%）"
+                : $"正在下载模型：{p.BytesDownloaded / (1024.0 * 1024):F0} MB";
         });
 
-        (bool Success, string? ErrorMessage) result;
+        (bool Success, string? ErrorMessage) result = (true, null);
         try
         {
-            result = await _switchModel(selectedModel, progress);
+            if (engineChanged && selectedEngine == "whisper")
+            {
+                // 引擎切到 Whisper 时把（可能也刚改过的）模型偏好先写进内存里，让 SwitchEngineAsync
+                // 直接按新偏好下载/加载——避免"先按旧模型切引擎、再按新模型二次下载"的双重开销。
+                // 失败时回滚内存值：SwitchEngineAsync 只在成功后才落盘。
+                var oldModelSize = _settings.ModelSize;
+                if (modelChanged) _settings.ModelSize = selectedModel.Key;
+                ModelStatusTextBlock.Text = $"正在切换到 Whisper 引擎（{selectedModel.DisplayName}，本地没有的话会先下载，请勿关闭窗口）...";
+                result = await _switchEngine("whisper", progress);
+                if (!result.Success && modelChanged) _settings.ModelSize = oldModelSize;
+            }
+            else
+            {
+                if (engineChanged)
+                {
+                    ModelStatusTextBlock.Text = "正在切换到闪电引擎...";
+                    result = await _switchEngine("sensevoice", progress);
+                }
+                if (result.Success && modelChanged)
+                {
+                    ModelStatusTextBlock.Text = selectedEngine == "whisper"
+                        ? $"正在切换模型（本地没有的话会先下载，约 {selectedModel.ApproxSizeDisplay}，请勿关闭窗口）..."
+                        : "正在记录 Whisper 模型偏好...";
+                    result = await _switchModel(selectedModel, progress);
+                }
+            }
         }
         catch (Exception ex)
         {
-            // _switchModel (App.SwitchModelAsync) already catches internally and should never
+            // _switchModel/_switchEngine (App 侧) already catch internally and should never
             // throw, but this UI-side call is the last line of defense against an unhandled
-            // exception on the UI thread taking the whole app down over a model switch.
+            // exception on the UI thread taking the whole app down over a switch.
             result = (false, ex.Message);
         }
 
@@ -284,9 +337,9 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            ModelStatusTextBlock.Text = $"模型切换失败：{result.ErrorMessage}";
+            ModelStatusTextBlock.Text = $"切换失败：{result.ErrorMessage}";
             MessageBox.Show(this,
-                $"识别模型切换失败：{result.ErrorMessage}\n\n可以重新点击「保存」重试，或改选其他模型；当前使用的模型不受影响。",
+                $"识别引擎/模型切换失败：{result.ErrorMessage}\n\n可以重新点击「保存」重试，或改选其他选项；当前使用的引擎不受影响。",
                 "超语音", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -297,6 +350,7 @@ public partial class SettingsWindow : Window
     {
         SaveButtonElement.IsEnabled = enabled;
         CancelButtonElement.IsEnabled = enabled;
+        EngineComboBox.IsEnabled = enabled;
         ModelComboBox.IsEnabled = enabled;
         LanguageComboBox.IsEnabled = enabled;
         MicrophoneComboBox.IsEnabled = enabled;

@@ -1,0 +1,16 @@
+本目录中的语音识别模型权重（model.int8.onnx / tokens.txt）来自：
+
+  模型名称：SenseVoice-Small（FunAudioLLM / 阿里巴巴通义实验室）
+  原始发布：https://huggingface.co/FunAudioLLM/SenseVoiceSmall
+  本应用使用的 int8 ONNX 导出由 sherpa-onnx 项目打包发布：
+  https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+  （sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09）
+
+模型权重的许可证为「FunASR Model Open Source License Agreement」（非 OSI 标准许可），
+全文见：https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+
+按该许可要求，本文件保留模型名称、来源与作者信息。该许可允许在保留署名的前提下
+使用、复制、修改与分发模型。sherpa-onnx 推理代码本身为 Apache-2.0 许可。
+
+同样随本应用分发的标点恢复模型（Models/punct/model.int8.onnx，ct-transformer，
+来自 FunASR / sherpa-onnx punctuation-models 发布）适用同一 FunASR 模型许可。

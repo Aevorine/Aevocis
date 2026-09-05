@@ -16,6 +16,9 @@
          CUDA > Vulkan > CoreML > OpenVino > CPU) and silently falls back to the CPU runtime above
          if no compatible GPU/driver is found - no app code needs to implement that detection. -->
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
+    <!-- v1.2.0 默认引擎（闪电/SenseVoice）：sherpa-onnx 官方 .NET 绑定，含 win-x64 原生
+         onnxruntime。本机实测比 Whisper small 稳态快 12 倍、识别峰值内存省 73%（TECH_ROADMAP.md §2）。 -->
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
   </ItemGroup>
 
   <ItemGroup>

@@ -29,12 +29,16 @@ public sealed record ModelOption(
 /// </summary>
 public static class ModelCatalog
 {
+    // v1.2.0: Small is no longer bundled with the installer - the default engine is now
+    // SenseVoice (whose model IS bundled), and every Whisper model is download-on-first-use.
+    // This alone cut the installer by ~460MB. The Key stays "small" so pre-1.2.0 settings.json
+    // files still resolve to the same model choice.
     public static readonly ModelOption Small = new(
         Key: "small",
-        DisplayName: "小（默认，快，约 488 MB，随程序安装）",
+        DisplayName: "小（快，约 488 MB，首次选中时下载）",
         FileName: "ggml-small.bin",
         GgmlType: GgmlType.Small,
-        Bundled: true,
+        Bundled: false,
         ApproxSizeBytes: 488_000_000);
 
     public static readonly ModelOption Medium = new(

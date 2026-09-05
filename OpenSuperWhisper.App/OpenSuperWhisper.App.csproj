@@ -36,7 +36,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="Models\ggml-small.bin" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <!-- v1.2.0：捆绑闪电引擎（SenseVoice int8）与中英标点模型；Whisper 的 ggml 模型不再捆绑，
+         全部按需下载（ModelCatalog），安装包因此缩小约 460MB。 -->
+    <None Include="Models\sensevoice\model.int8.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="Models\sensevoice\tokens.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="Models\sensevoice\LICENSE-MODEL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="Models\punct\model.int8.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="app.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('app.ico')" />
   </ItemGroup>
 

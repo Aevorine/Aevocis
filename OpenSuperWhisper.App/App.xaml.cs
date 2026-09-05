@@ -33,9 +33,18 @@ public partial class App : Application
     private VoiceCommandStore? _voiceCommandStore;
     private MacroStore? _macroStore;
     private GlobalPushToTalkHotkey? _pushToTalkHotkey;
-    private ITranscriptionEngine? _engine;
+    // v1.2.0 双引擎：DictationController 拿到的是这个切换器（ITranscriptionEngine），真实引擎
+    // （闪电/SenseVoice 或 Whisper）由 SwitchEngineAsync 在里面热插拔，控制器无感知。
+    private EngineSwitcher? _engine;
+    private string _startupEngineInitPath = "";
     private readonly ModelDownloadService _modelDownloader = new();
     private string _modelsBaseDir = "";
+
+    /// <summary>SenseVoice 识别模型目录（随安装包捆绑，Velopack 更新时随版本走）。</summary>
+    private static string SenseVoiceModelDir => Path.Combine(AppContext.BaseDirectory, "Models", "sensevoice");
+
+    /// <summary>ct-transformer 中英标点模型（随安装包捆绑）。文件缺失时 SenseVoice 引擎自动降级为不加标点。</summary>
+    private static string PunctuationModelPath => Path.Combine(AppContext.BaseDirectory, "Models", "punct", "model.int8.onnx");
 
     // F01: guards SwitchModelAsync against overlapping calls (e.g. mashing Save, or Save while a
     // previous switch's download is still in flight) - only one switch runs at a time.
@@ -108,26 +117,43 @@ public partial class App : Application
         _voiceCommandStore = voiceCommandStore;
         _macroStore = macroStore;
 
-        // F01: resolve the on-disk path for whatever model the user has selected (ModelSize
-        // defaults to "small", so existing settings.json files with no ModelSize field at all
-        // behave exactly as before). If a previously-selected downloaded model's file has gone
-        // missing (user deleted it, settings.json copied to a new machine, etc.), fall back to
-        // the always-present bundled Small model for *this session* rather than silently kicking
-        // off a multi-hundred-MB download before the tray icon even exists - ModelSize itself is
-        // left untouched so Settings still shows their actual preference and a save from there
-        // re-triggers the download.
         _modelsBaseDir = Path.Combine(AppContext.BaseDirectory, "Models");
-        var startupModel = ModelCatalog.Resolve(settings.ModelSize);
-        var startupModelPath = ModelCatalog.GetLocalPath(startupModel, _modelsBaseDir);
-        if (!startupModel.Bundled && !File.Exists(startupModelPath))
+
+        // v1.2.0 引擎装配：默认「闪电」（SenseVoice int8，随安装包捆绑）；选了 Whisper 但它的
+        // 模型文件本地不存在（v1.2.0 起 Whisper 模型不再捆绑、全部按需下载，或用户删了缓存）时，
+        // 本次会话回退到闪电并提示，而不是在托盘图标都还没出现时就悄悄开一个几百 MB 的下载——
+        // RecognitionEngine 设置本身不动，用户去设置里重新保存即可触发下载。
+        var startupEngineKey = settings.RecognitionEngine == "whisper" ? "whisper" : "sensevoice";
+        string? whisperFallbackNotice = null;
+        if (startupEngineKey == "whisper")
         {
-            Log.Info($"已选择的模型 {startupModel.Key} 本地文件不存在（{startupModelPath}），本次启动临时使用小模型，可在设置里重新选择以触发下载");
-            startupModelPath = ModelCatalog.GetLocalPath(ModelCatalog.Small, _modelsBaseDir);
+            var startupModel = ModelCatalog.Resolve(settings.ModelSize);
+            var startupModelPath = ModelCatalog.GetLocalPath(startupModel, _modelsBaseDir);
+            if (File.Exists(startupModelPath))
+            {
+                _startupEngineInitPath = startupModelPath;
+                if (settings.ModelPath != startupModelPath)
+                {
+                    settings.ModelPath = startupModelPath;
+                    settingsStore.Save(settings);
+                }
+            }
+            else
+            {
+                Log.Info($"Whisper 模型 {startupModel.Key} 本地文件不存在（{startupModelPath}），本次启动回退到闪电引擎，可在设置里重新选择 Whisper 以触发下载");
+                whisperFallbackNotice = "Whisper 模型尚未下载，本次已改用闪电引擎；要用 Whisper 请到设置里重新保存一次";
+                startupEngineKey = "sensevoice";
+            }
         }
-        if (settings.ModelPath != startupModelPath)
+        ITranscriptionEngine initialEngine;
+        if (startupEngineKey == "sensevoice")
         {
-            settings.ModelPath = startupModelPath;
-            settingsStore.Save(settings);
+            initialEngine = new SenseVoiceTranscriptionEngine(PunctuationModelPath);
+            _startupEngineInitPath = SenseVoiceModelDir;
+        }
+        else
+        {
+            initialEngine = new WhisperTranscriptionEngine();
         }
 
         // F29: shown once per install, non-modally so it never delays model loading/hotkey
@@ -142,7 +168,7 @@ public partial class App : Application
             Log.Info($"历史记录自动过期：清理了 {purgedCount} 条超过 {settings.HistoryRetentionDays} 天的记录");
 
         IAudioRecorder recorder = new MicRecorder();
-        ITranscriptionEngine engine = new WhisperTranscriptionEngine();
+        var engine = new EngineSwitcher(initialEngine);
         _engine = engine;
         ITextInjector injector = new UnicodeTextInjector();
         var pushToTalkHotkey = new GlobalPushToTalkHotkey(settings.PushToTalkVirtualKeyCode);
@@ -269,6 +295,8 @@ public partial class App : Application
             _trayIcon.ShowBalloonTip("超语音", "历史记录文件已损坏，已重置为空", BalloonIcon.Warning);
         if (historyStore.IsDegraded)
             _trayIcon.ShowBalloonTip("超语音", "历史记录文件暂时无法读取（可能被占用），本次以空历史运行，不会覆盖原文件", BalloonIcon.Warning);
+        if (whisperFallbackNotice is not null)
+            _trayIcon.ShowBalloonTip("超语音", whisperFallbackNotice, BalloonIcon.Info);
 
         await RetryInitializationAsync(isFirstAttempt: true);
     }
@@ -290,7 +318,7 @@ public partial class App : Application
         {
             try
             {
-                await _engine!.InitializeAsync(_settings!.ModelPath);
+                await _engine!.InitializeAsync(_startupEngineInitPath);
                 _engineReady = true;
             }
             catch (Exception ex)
@@ -504,7 +532,8 @@ public partial class App : Application
             vk => _pushToTalkHotkey!.SetVirtualKeyCode(vk),
             appHotkeys => _pushToTalkHotkey!.SetAppSpecificHotkeys(appHotkeys), // F12
             mode => _pushToTalkHotkey!.SetMode(mode), // F09
-            SwitchModelAsync); // F01
+            SwitchModelAsync, // F01
+            SwitchEngineAsync); // v1.2.0 双引擎
         window.ShowDialog();
     }
 
@@ -525,7 +554,20 @@ public partial class App : Application
         await _modelSwitchLock.WaitAsync();
         try
         {
-            if (_settings!.ModelSize == option.Key && File.Exists(_settings.ModelPath))
+            // v1.2.0：模型选择只对 Whisper 引擎有意义。闪电引擎在用时改这个下拉，只记住偏好
+            // （下次切到 Whisper 时才按它下载/加载），不动正在跑的引擎。
+            if (_settings!.RecognitionEngine != "whisper")
+            {
+                if (_settings.ModelSize != option.Key)
+                {
+                    _settings.ModelSize = option.Key;
+                    _settingsStore!.Save(_settings);
+                    Log.Info($"Whisper 模型偏好已记录为 {option.Key}（当前引擎是闪电，切到 Whisper 时生效）");
+                }
+                return (true, null);
+            }
+
+            if (_settings.ModelSize == option.Key && File.Exists(_settings.ModelPath))
                 return (true, null); // already the active model - nothing to do
 
             _controller!.TranscriptionEngineReady = false;
@@ -548,6 +590,72 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error($"切换识别模型到 {option.Key} 失败", ex);
+            return (false, ex.Message);
+        }
+        finally
+        {
+            _modelSwitchLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// v1.2.0：运行时切换识别引擎（"sensevoice" ⇄ "whisper"），不重启。切到 Whisper 时按当前
+    /// ModelSize 偏好先确保模型在本地（没有就下载，进度回报给设置窗口）；新引擎完整初始化成功后
+    /// 才通过 EngineSwitcher 热插拔并落盘设置——失败时旧引擎原样在用，听写不受影响。
+    /// 与 SwitchModelAsync 共用一把锁：引擎切换和模型切换不允许并发。
+    /// </summary>
+    private async Task<(bool Success, string? ErrorMessage)> SwitchEngineAsync(
+        string engineKey, IProgress<ModelDownloadProgress>? progress)
+    {
+        await _modelSwitchLock.WaitAsync();
+        try
+        {
+            engineKey = engineKey == "whisper" ? "whisper" : "sensevoice";
+            if (_settings!.RecognitionEngine == engineKey)
+                return (true, null);
+
+            _controller!.TranscriptionEngineReady = false;
+            try
+            {
+                ITranscriptionEngine newEngine;
+                string initPath;
+                if (engineKey == "whisper")
+                {
+                    var option = ModelCatalog.Resolve(_settings.ModelSize);
+                    initPath = await _modelDownloader.EnsureLocalAsync(option, _modelsBaseDir, progress);
+                    newEngine = new WhisperTranscriptionEngine();
+                }
+                else
+                {
+                    initPath = SenseVoiceModelDir;
+                    newEngine = new SenseVoiceTranscriptionEngine(PunctuationModelPath);
+                }
+
+                try
+                {
+                    await newEngine.InitializeAsync(initPath);
+                }
+                catch
+                {
+                    newEngine.Dispose();
+                    throw;
+                }
+
+                await _engine!.SwapAsync(newEngine);
+                _settings.RecognitionEngine = engineKey;
+                if (engineKey == "whisper") _settings.ModelPath = initPath;
+                _settingsStore!.Save(_settings);
+                Log.Info($"识别引擎已切换为 {(engineKey == "whisper" ? "Whisper" : "闪电（SenseVoice）")}，无需重启");
+                return (true, null);
+            }
+            finally
+            {
+                _controller.TranscriptionEngineReady = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"切换识别引擎到 {engineKey} 失败", ex);
             return (false, ex.Message);
         }
         finally

@@ -60,10 +60,17 @@
                       DisplayMemberPath="Name"/>
         </StackPanel>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,0,0,4">
-            <TextBlock Text="识别模型：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
-            <ComboBox x:Name="ModelComboBox" Width="240" HorizontalAlignment="Left"
-                      DisplayMemberPath="DisplayName"/>
+        <StackPanel Grid.Row="4" Margin="0,0,0,4">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <TextBlock Text="识别引擎：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
+                <ComboBox x:Name="EngineComboBox" Width="240" HorizontalAlignment="Left"
+                          DisplayMemberPath="Display" SelectionChanged="EngineComboBox_SelectionChanged"/>
+            </StackPanel>
+            <StackPanel x:Name="WhisperModelRow" Orientation="Horizontal">
+                <TextBlock Text="Whisper 模型：" Width="110" VerticalAlignment="Center" Foreground="{StaticResource PaperInk}"/>
+                <ComboBox x:Name="ModelComboBox" Width="240" HorizontalAlignment="Left"
+                          DisplayMemberPath="DisplayName"/>
+            </StackPanel>
         </StackPanel>
 
         <TextBlock x:Name="ModelStatusTextBlock" Grid.Row="5" Text=""

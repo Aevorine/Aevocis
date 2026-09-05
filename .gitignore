@@ -11,8 +11,10 @@ obj/
 .idea/
 *.sln.iml
 
-# Whisper model weights — too large for git history, shipped in the Release zip instead
+# Model weights — too large for git history, shipped inside the installer instead
+# (see OpenSuperWhisper.App/Models/README.md for exact download sources).
 OpenSuperWhisper.App/Models/*.bin
+OpenSuperWhisper.App/Models/**/*.onnx
 
 # Local packaging output (vpk pack / dotnet publish) — uploaded straight to GitHub Releases,
 # never committed; huge binaries here would bloat history forever.

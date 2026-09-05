@@ -12,6 +12,13 @@ public enum PushToTalkMode
 
 public sealed class AppSettings
 {
+    /// <summary>v1.2.0: which recognition engine to use - "sensevoice" (闪电引擎, the default:
+    /// SenseVoice int8 via sherpa-onnx, Chinese-optimized, ~0.2s per utterance, ~340MB peak) or
+    /// "whisper" (Whisper.net, 99 languages, slower/heavier; its model is chosen by ModelSize
+    /// below and downloaded on demand). Any unknown value is treated as "sensevoice" so a
+    /// corrupted/foreign settings.json never selects a broken engine.</summary>
+    public string RecognitionEngine { get; set; } = "sensevoice";
+
     public string ModelPath { get; set; } = "";
     /// <summary>F01: which recognition model the user picked, e.g. "small"/"medium"/"large-v3-turbo"
     /// (see OpenSuperWhisper.Recognition.ModelCatalog for the full list). Default is "small" - the
