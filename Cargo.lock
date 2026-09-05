@@ -3434,6 +3434,7 @@ name = "osw_native"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "raw-window-handle",
  "sherpa-onnx",
  "slint",
  "windows 0.62.2",
@@ -4304,6 +4305,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",
