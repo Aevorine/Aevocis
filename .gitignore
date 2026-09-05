@@ -23,3 +23,7 @@ release-dist/
 # OS cruft
 Thumbs.db
 .DS_Store
+
+# Local working/session artifacts (never uploaded)
+.claude/
+.lavish/
