@@ -139,6 +139,12 @@ public partial class SettingsWindow : Window
         // F11
         ShowDraftBeforeInjectCheckBox.IsChecked = settings.ShowDraftBeforeInject;
 
+        // F33: depends on F11 above - there's no edit signal to learn from without the draft
+        // window, so this checkbox is grayed out (with an annotation explaining why) whenever F11
+        // is off, regardless of what the saved value underneath is.
+        TermLearningEnabledCheckBox.IsChecked = settings.TermLearningEnabled;
+        UpdateTermLearningDependency();
+
         LanguageComboBox.ItemsSource = LanguageOptions;
         LanguageComboBox.SelectedItem = LanguageOptions.FirstOrDefault(o => o.Value == settings.Language)
                                          ?? LanguageOptions[0];
@@ -222,6 +228,23 @@ public partial class SettingsWindow : Window
 
     private void EngineComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         => UpdateWhisperModelRowVisibility();
+
+    /// <summary>F33: the term-learning checkbox only ever does anything while F11 (show-draft) is
+    /// also on - there's no edit signal to learn from otherwise. Grays it out and annotates the
+    /// label to say so whenever F11 is off, rather than letting the user tick a box that silently
+    /// does nothing.</summary>
+    private void UpdateTermLearningDependency()
+    {
+        if (TermLearningEnabledCheckBox is null || TermLearningEnabledLabel is null) return;
+        var draftEnabled = ShowDraftBeforeInjectCheckBox.IsChecked == true;
+        TermLearningEnabledCheckBox.IsEnabled = draftEnabled;
+        TermLearningEnabledLabel.Text = draftEnabled
+            ? "从上方确认框里的修改自动学习专业词典（同一处修改反复出现 3 次以上会自动加入词典，并有托盘提示）"
+            : "从上方确认框里的修改自动学习专业词典（需先勾选上面「先弹出确认框」才会生效，当前未勾选）";
+    }
+
+    private void ShowDraftBeforeInjectCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
+        => UpdateTermLearningDependency();
 
     private void HotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
     {
@@ -348,6 +371,7 @@ public partial class SettingsWindow : Window
         _settings.AppSpecificHotkeys = ParseAppSpecificHotkeys(AppHotkeysTextBox.Text);
         _settings.PushToTalkMode = ToggleModeRadioButton.IsChecked == true ? PushToTalkMode.Toggle : PushToTalkMode.Hold;
         _settings.ShowDraftBeforeInject = ShowDraftBeforeInjectCheckBox.IsChecked == true;
+        _settings.TermLearningEnabled = TermLearningEnabledCheckBox.IsChecked == true; // F33
         _settings.ShowHideHotkeyModifier = _pendingToggleModifiers; // F32
         _settings.ShowHideVirtualKeyCode = _pendingToggleVkCode;
 
@@ -469,6 +493,9 @@ public partial class SettingsWindow : Window
         HoldModeRadioButton.IsEnabled = enabled;
         ToggleModeRadioButton.IsEnabled = enabled;
         ShowDraftBeforeInjectCheckBox.IsEnabled = enabled;
+        // F33: only re-enable if F11 is also on - SetControlsEnabled(true) must not undo the
+        // dependency graying UpdateTermLearningDependency is responsible for.
+        TermLearningEnabledCheckBox.IsEnabled = enabled && ShowDraftBeforeInjectCheckBox.IsChecked == true;
         AppPromptsTextBox.IsEnabled = enabled;
         AppHotkeysTextBox.IsEnabled = enabled;
         VoiceCommandsTextBox.IsEnabled = enabled;
@@ -566,6 +593,7 @@ public partial class SettingsWindow : Window
         to.AppSpecificHotkeys = from.AppSpecificHotkeys;
         to.PushToTalkMode = from.PushToTalkMode;
         to.ShowDraftBeforeInject = from.ShowDraftBeforeInject;
+        to.TermLearningEnabled = from.TermLearningEnabled; // F33
         to.ShowHideHotkeyModifier = from.ShowHideHotkeyModifier; // F32
         to.ShowHideVirtualKeyCode = from.ShowHideVirtualKeyCode;
     }

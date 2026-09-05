@@ -121,6 +121,7 @@ public partial class App : Application
         var settingsStore = new SettingsStore();
         var historyStore = new HistoryStore();
         var termsStore = new TermDictionaryStore();
+        var termLearningStore = new TermLearningStore(); // F33
         var voiceCommandStore = new VoiceCommandStore();
         var macroStore = new MacroStore();
         var settings = settingsStore.Load();
@@ -190,7 +191,7 @@ public partial class App : Application
         IHotkeyListener hotkey = pushToTalkHotkey;
         IDraftConfirmation draftConfirmation = new DraftConfirmationService(Dispatcher);
 
-        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore, draftConfirmation, voiceCommandStore, macroStore);
+        _controller = new DictationController(recorder, engine, injector, hotkey, historyStore, settings, termsStore, termLearningStore, draftConfirmation, voiceCommandStore, macroStore);
         _mainWindow = new MainWindow(historyStore, settings, ShowSettingsWindow);
         _overlayWindow = new RecordingOverlayWindow();
 
@@ -304,6 +305,12 @@ public partial class App : Application
         // transcript, so it doesn't touch history. Also restores idle priority (F18), same as a
         // normal TranscriptionCompleted - a matched command/macro is a "we're done working" event
         // just like a completed transcription is.
+        // F33: term-dictionary self-learning just auto-added an entry - the write already
+        // happened by the time this fires, this is purely "tell the user it happened" (never
+        // silent, since it changes future dictation behavior on their behalf).
+        _controller.TermLearned += (wrong, correct) => Dispatcher.Invoke(() =>
+            _trayIcon!.ShowBalloonTip("Aevocis", $"已根据你的多次修改，把 \"{wrong}\" → \"{correct}\" 加入专业词典", BalloonIcon.Info));
+
         _controller.CommandExecuted += _ =>
         {
             SetIdlePriority();

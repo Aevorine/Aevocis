@@ -1,3 +1,4 @@
+using System.Linq;
 using OpenSuperWhisper.Core;
 using OpenSuperWhisper.Core.Models;
 using OpenSuperWhisper.Hotkeys;
@@ -15,6 +16,7 @@ public sealed class DictationController : IDisposable
     private readonly HistoryStore _history;
     private readonly AppSettings _settings;
     private readonly TermDictionaryStore _terms;
+    private readonly TermLearningStore _termLearning;
     private readonly IDraftConfirmation _draftConfirmation;
     private readonly VoiceCommandStore _voiceCommands;
     private readonly MacroStore _macros;
@@ -61,6 +63,11 @@ public sealed class DictationController : IDisposable
     /// microphone present, or it's exclusively held by another app).</summary>
     public event Action<string>? RecordingFailed;
 
+    /// <summary>F33: raised whenever a repeated draft-confirm edit just got auto-added to the real
+    /// term dictionary - (wrong, correct). Purely an FYI event for the UI (tray balloon); the
+    /// dictionary write itself already happened by the time this fires.</summary>
+    public event Action<string, string>? TermLearned;
+
     public DictationController(
         IAudioRecorder recorder,
         ITranscriptionEngine engine,
@@ -69,6 +76,7 @@ public sealed class DictationController : IDisposable
         HistoryStore history,
         AppSettings settings,
         TermDictionaryStore terms,
+        TermLearningStore termLearning,
         IDraftConfirmation draftConfirmation,
         VoiceCommandStore voiceCommands,
         MacroStore macros)
@@ -80,6 +88,7 @@ public sealed class DictationController : IDisposable
         _history = history;
         _settings = settings;
         _terms = terms;
+        _termLearning = termLearning;
         _draftConfirmation = draftConfirmation;
         _voiceCommands = voiceCommands;
         _macros = macros;
@@ -262,6 +271,15 @@ public sealed class DictationController : IDisposable
                     Log.Info("草稿确认已取消，未注入文本");
                     return;
                 }
+
+                // F33: term-dictionary self-learning. Compares exactly what was shown in the
+                // confirm window (`text`, already past term-dictionary/punctuation correction)
+                // against what the user actually typed back - the only signal this feature is
+                // allowed to use (see TermLearning's doc comment). Must run before `text =
+                // confirmed` below so it's diffing the right two strings.
+                if (_settings.TermLearningEnabled && confirmed != text)
+                    TryLearnFromDraftEdit(text, confirmed);
+
                 text = confirmed;
             }
 
@@ -279,6 +297,46 @@ public sealed class DictationController : IDisposable
             // hook thread's continuation, and an unhandled exception here has no safe place to
             // go - but it's now logged instead of fully discarded.
             Log.Error("听写处理失败（转写或文本注入阶段）", ex);
+        }
+    }
+
+    /// <summary>
+    /// F33 term-dictionary self-learning. Diffs the draft text the user saw against what they
+    /// confirmed, records every resulting (original -&gt; replacement) span in the small pending-
+    /// candidates store, and - for any pair that just crossed <see cref="TermLearning.PromotionThreshold"/> -
+    /// adds it to the real term dictionary and raises <see cref="TermLearned"/> so the UI can tell
+    /// the user. Best-effort end to end: any failure here is logged and swallowed, never allowed to
+    /// affect the dictation that's already been confirmed and is about to be injected regardless.
+    /// </summary>
+    private void TryLearnFromDraftEdit(string draftText, string confirmedText)
+    {
+        try
+        {
+            var observed = _termLearning.Load();
+            var promoted = TermLearning.RecordAndPromote(draftText, confirmedText, observed);
+            _termLearning.Save(observed);
+
+            if (promoted.Count == 0) return;
+
+            var corrections = _terms.Load();
+            var changed = false;
+            foreach (var (wrong, correct) in promoted)
+            {
+                // Avoid piling up an exact duplicate row if this exact pair was somehow already
+                // added (e.g. manually, or by a previous promotion that Undo removed and the same
+                // edit then recurred) - TermDictionaryWindow/TermDictionary.Apply have no problem
+                // with duplicate rows, but there's no reason to create one.
+                if (corrections.Any(c => c.Wrong == wrong && c.Correct == correct)) continue;
+                corrections.Add(new TermCorrection(wrong, correct));
+                changed = true;
+                Log.Info($"专业词典自学习：\"{wrong}\" -> \"{correct}\"（同一处修改已出现 {TermLearning.PromotionThreshold} 次以上，自动加入专业词典）");
+                TermLearned?.Invoke(wrong, correct);
+            }
+            if (changed) _terms.Save(corrections);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("专业词典自学习处理失败", ex);
         }
     }
 

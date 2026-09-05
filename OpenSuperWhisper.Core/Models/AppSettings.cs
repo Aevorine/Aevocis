@@ -72,6 +72,19 @@ public sealed class AppSettings
     /// until they opt in.</summary>
     public bool ShowDraftBeforeInject { get; set; } = false;
 
+    /// <summary>F33: when true (the default) AND <see cref="ShowDraftBeforeInject"/> is also true,
+    /// DictationController watches edits the user makes inside the F11 draft-confirm window - the
+    /// ONLY signal this feature ever uses, see <see cref="Core.TermLearning"/>'s doc comment for
+    /// the full scope boundary - and once the same (recognized fragment -> user's replacement)
+    /// edit has recurred <see cref="Core.TermLearning.PromotionThreshold"/> times across separate
+    /// dictations, automatically adds it to the real term dictionary and tells the user via a tray
+    /// balloon. Has no effect at all while ShowDraftBeforeInject is off (there is no edit signal to
+    /// learn from without that window), regardless of this flag's value. Defaults to true - unlike
+    /// ShowDraftBeforeInject itself, this is inert until the user opts into that window, so
+    /// defaulting it on doesn't change behavior for the vast majority of users who never enable
+    /// ShowDraftBeforeInject in the first place.</summary>
+    public bool TermLearningEnabled { get; set; } = true;
+
     /// <summary>F32: Win32 MOD_* flags (see OpenSuperWhisper.Hotkeys.GlobalToggleWindowHotkey's
     /// ModControl/ModAlt/ModShift/ModWin re-exports, or winuser.h) for the dedicated show/hide
     /// main window hotkey - kept as a plain int here, not a Hotkeys-project type, because Core
