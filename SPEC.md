@@ -22,9 +22,9 @@
 | T3 | Recognition：ModelCatalog small 改按需下载 | whisper 引擎选 small 且本地无文件时走下载路径，不再假设捆绑 |
 | T4 | Audio：MicRecorder 双路同录自动选优 | 无头验证：内置阵列 vs ToDesk 虚拟麦双录，选优逻辑选中有信号的一路，双路得分入日志 |
 | T5 | App：引擎装配/切换 + SettingsWindow 引擎下拉 + csproj 捆绑 SenseVoice/标点模型、去捆绑 ggml | 全解决方案 0 error 编译；引擎切换不重启生效 |
-| T6 | 活体 E2E：publish 版真启动、真按快捷键、扬声器放语音、文字真落到记事本 | log.txt 出现 SenseVoice 识别耗时 <1s 记录；记事本收到正确文本 |
-| T7 | 打包发布：vpk pack 1.2.0 + 隐私扫描 + GitHub Release + 清旧版只留两版 | Release 页有 v1.2.0；已装 1.1.0 的真实实例弹出"发现新版本"气泡（不代用户点升级） |
-| T8 | 双轨自检 + 文档 + 记忆沉淀 | 静默失效/实际损坏两轨跑完；TECH_ROADMAP 实效验证栏有前后对比数据 |
+| T6 | 活体 E2E：publish 版真启动、真按快捷键、扬声器放语音、文字真落到记事本 | **部分完成**：log.txt 确认 SenseVoice 识别耗时 359ms（<1s 达标）；合成语音声学耦合太弱（峰值0.001），句子级识别正确性未验证，需用户真人测试兜底，见 TECH_ROADMAP.md §5 |
+| T7 | 打包发布：vpk pack 1.2.0 + 隐私扫描 + GitHub Release + 清旧版只留两版 | **完成**：gitleaks/semgrep/OSV 扫描干净；v1.2.0-windows 已发布 https://github.com/Aevorine/OpenSuperWhisper_Windows/releases/tag/v1.2.0-windows；v1.0.0-windows 已删除，现存 v1.1.0/v1.2.0 两版 |
+| T8 | 双轨自检 + 文档 + 记忆沉淀 | **完成**：新增/改动的 8 个文件逐一读过，未发现静默失效或实际损坏；`dotnet build` 0 警告 0 错误；TECH_ROADMAP 实效验证栏已回填 |
 
 ## 保活红线
 - DictationController / GlobalPushToTalkHotkey / UnicodeTextInjector / 历史 / 宏 / 口头命令 / 术语纠错：**不改**。
