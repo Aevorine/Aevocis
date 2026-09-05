@@ -6,6 +6,7 @@
 //! reference design this replicates in idiomatic Rust (not copied).
 
 pub mod audio;
+pub mod hotkey;
 pub mod inject;
 pub mod recognizer;
 pub mod target;
