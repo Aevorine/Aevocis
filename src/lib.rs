@@ -5,6 +5,7 @@
 //! these pieces are wired together, and `native/src/main.cpp` for the
 //! reference design this replicates in idiomatic Rust (not copied).
 
+pub mod audio;
 pub mod inject;
 pub mod recognizer;
 pub mod target;
