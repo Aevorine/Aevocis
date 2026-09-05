@@ -7,7 +7,7 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Topmost="True"
-        Background="{StaticResource PaperBackground}"
+        Background="{DynamicResource PaperBackground}"
         Icon="Assets/aevocis-logo.png">
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -18,13 +18,13 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="欢迎使用 Aevocis" FontSize="18" FontFamily="Georgia"
-                   Foreground="{StaticResource PaperInk}" Margin="0,0,0,20"/>
+                   Foreground="{DynamicResource PaperInk}" Margin="0,0,0,20"/>
 
         <StackPanel Grid.Row="1" VerticalAlignment="Center">
             <TextBlock x:Name="TitleText" FontSize="16" FontWeight="Bold"
-                       Foreground="{StaticResource PaperInk}" Margin="0,0,0,10"/>
+                       Foreground="{DynamicResource PaperInk}" Margin="0,0,0,10"/>
             <TextBlock x:Name="BodyText" FontSize="13" TextWrapping="Wrap"
-                       Foreground="{StaticResource PaperMuted}" LineHeight="20"/>
+                       Foreground="{DynamicResource PaperMuted}" LineHeight="20"/>
         </StackPanel>
 
         <StackPanel Grid.Row="2" x:Name="Dots" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,16">

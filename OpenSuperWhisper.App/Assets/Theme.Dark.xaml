@@ -1,0 +1,14 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- G27: 深色模式跟随系统。同一套"纸感 Paper"角色（背景/表面/描边/墨色/静音色/强调色），
+         反转明度并重新校过对比度，不是简单取反色 - 强调色在深色底上调亮，按钮上的文字改回深色
+         底色以保证可读性。 -->
+    <SolidColorBrush x:Key="PaperBackground" Color="#1E1C19"/>
+    <SolidColorBrush x:Key="PaperHeader" Color="#29271F"/>
+    <SolidColorBrush x:Key="PaperSurface" Color="#242220"/>
+    <SolidColorBrush x:Key="PaperBorder" Color="#3A362E"/>
+    <SolidColorBrush x:Key="PaperInk" Color="#EDE7DC"/>
+    <SolidColorBrush x:Key="PaperMuted" Color="#A39C8C"/>
+    <SolidColorBrush x:Key="PaperAccent" Color="#6FA085"/>
+    <SolidColorBrush x:Key="PaperAccentForeground" Color="#14120F"/>
+</ResourceDictionary>

@@ -191,6 +191,17 @@ public sealed class DictationController : IDisposable
 
             var text = await _engine.TranscribeAsync(samples, _settings.Language, appPrompt,
                 onPartialResult: partial => PartialTranscriptionUpdated?.Invoke(partial));
+            // G19 听写内容内存即焚（部分）：raw audio is the more sensitive artifact here (it can
+            // carry background speech/environment sound beyond whatever got transcribed) and,
+            // unlike the recognized string below, it's a mutable buffer this method fully owns -
+            // safe to zero the instant the engine is done reading it. The recognized *text*
+            // itself deliberately keeps flowing into Log.Info/history exactly as before: .NET
+            // strings are immutable/interned and this method has no way to reach copies already
+            // handed to the logger, so pretending to "erase" the string would be theater without
+            // also reworking the diagnostic logging added in earlier rounds specifically to make
+            // silent dictation failures debuggable - that trade-off needs its own decision, not a
+            // silent regression bundled in here.
+            Array.Clear(samples);
             Log.Info($"识别结果：\"{text}\"");
             if (string.IsNullOrWhiteSpace(text) || IsNonSpeechMarker(text)) return;
 

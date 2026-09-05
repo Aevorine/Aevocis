@@ -5,7 +5,7 @@
         Height="440" Width="460"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
-        Background="{StaticResource PaperBackground}"
+        Background="{DynamicResource PaperBackground}"
         Icon="Assets/aevocis-logo.png">
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -16,11 +16,11 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="识别到左边这个词时，自动替换成右边的词（比如某个专有名词总被听错）。"
-                   Foreground="{StaticResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                   Foreground="{DynamicResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
         <DataGrid x:Name="TermsGrid" Grid.Row="1" AutoGenerateColumns="False"
                   CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
-                  Background="{StaticResource PaperSurface}" BorderBrush="{StaticResource PaperBorder}" BorderThickness="1"
+                  Background="{DynamicResource PaperSurface}" BorderBrush="{DynamicResource PaperBorder}" BorderThickness="1"
                   RowHeaderWidth="0" Margin="0,0,0,10">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="错误词（识别常出现的）" Binding="{Binding Wrong, UpdateSourceTrigger=PropertyChanged}" Width="*"/>

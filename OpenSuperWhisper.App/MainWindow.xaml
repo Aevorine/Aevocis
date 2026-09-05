@@ -4,21 +4,21 @@
         Title="Aevocis" Height="560" Width="380"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize"
-        Background="{StaticResource PaperBackground}"
+        Background="{DynamicResource PaperBackground}"
         FontFamily="Segoe UI"
         Icon="Assets/aevocis-logo.png">
     <DockPanel>
         <!-- No in-content brand-name label here on purpose: the OS title bar/taskbar/Alt-Tab
              already show "Aevocis" via Window.Title and Icon, so repeating the name in the
              content area would just be the same label twice. -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource PaperHeader}"
-                BorderBrush="{StaticResource PaperBorder}" BorderThickness="0,0,0,1" Padding="16,14,16,10">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource PaperHeader}"
+                BorderBrush="{DynamicResource PaperBorder}" BorderThickness="0,0,0,1" Padding="16,14,16,10">
             <DockPanel>
                 <Image Source="Assets/aevocis-logo.png" Width="22" Height="22" DockPanel.Dock="Left"
                        ToolTip="Aevocis"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Ellipse Width="6" Height="6" Fill="{StaticResource PaperAccent}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="StatusText" Text="就绪" Foreground="{StaticResource PaperMuted}" FontSize="12" VerticalAlignment="Center"/>
+                    <Ellipse Width="6" Height="6" Fill="{DynamicResource PaperAccent}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="StatusText" Text="就绪" Foreground="{DynamicResource PaperMuted}" FontSize="12" VerticalAlignment="Center"/>
                     <Button Content="设置..." Margin="12,0,0,0" Padding="8,2" FontSize="11" Click="SettingsButton_Click"/>
                 </StackPanel>
             </DockPanel>
@@ -26,15 +26,15 @@
 
         <Border DockPanel.Dock="Top" Padding="24,10,24,16">
             <StackPanel HorizontalAlignment="Center">
-                <Ellipse Width="80" Height="80" Fill="{StaticResource PaperAccent}"
+                <Ellipse Width="80" Height="80" Fill="{DynamicResource PaperAccent}"
                          ToolTip="按住右 Ctrl 说话，松开自动输入；Ctrl+Alt+H 或单击托盘图标可随时显示/隐藏本窗口"/>
             </StackPanel>
         </Border>
 
-        <Border DockPanel.Dock="Top" Background="{StaticResource PaperSurface}"
-                BorderBrush="{StaticResource PaperBorder}" BorderThickness="0,1,0,1" Padding="14,8">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource PaperSurface}"
+                BorderBrush="{DynamicResource PaperBorder}" BorderThickness="0,1,0,1" Padding="14,8">
             <DockPanel>
-                <TextBlock x:Name="ModelLabel" Text="模型：" FontSize="11" Foreground="{StaticResource PaperMuted}"
+                <TextBlock x:Name="ModelLabel" Text="模型：" FontSize="11" Foreground="{DynamicResource PaperMuted}"
                            DockPanel.Dock="Left" VerticalAlignment="Center"/>
                 <Button x:Name="ClearHistoryButton" Content="清空历史" HorizontalAlignment="Right"
                         Padding="8,2" FontSize="11" Click="ClearHistoryButton_Click"/>
@@ -42,20 +42,20 @@
         </Border>
 
         <DockPanel DockPanel.Dock="Top" Margin="16,10,16,6">
-            <TextBlock Text="最近" FontSize="11" Foreground="{StaticResource PaperMuted}"
+            <TextBlock Text="最近" FontSize="11" Foreground="{DynamicResource PaperMuted}"
                        DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <!-- F10: live substring filter over history text (see MainWindow.ApplyHistoryFilter). -->
             <TextBox x:Name="HistorySearchBox" FontSize="12" Padding="6,3" VerticalContentAlignment="Center"
-                     Background="{StaticResource PaperSurface}" Foreground="{StaticResource PaperInk}"
-                     BorderBrush="{StaticResource PaperBorder}" TextChanged="HistorySearchBox_TextChanged"/>
+                     Background="{DynamicResource PaperSurface}" Foreground="{DynamicResource PaperInk}"
+                     BorderBrush="{DynamicResource PaperBorder}" TextChanged="HistorySearchBox_TextChanged"/>
         </DockPanel>
 
         <ListBox x:Name="HistoryList" BorderThickness="0" Background="Transparent" Margin="8,0,8,8">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <StackPanel Orientation="Horizontal" Margin="6">
-                        <TextBlock Text="{Binding Timestamp, StringFormat={}{0:HH:mm}}" Width="42" Foreground="{StaticResource PaperMuted}" FontSize="11"/>
-                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="13" Width="270" Foreground="{StaticResource PaperInk}"/>
+                        <TextBlock Text="{Binding Timestamp, StringFormat={}{0:HH:mm}}" Width="42" Foreground="{DynamicResource PaperMuted}" FontSize="11"/>
+                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="13" Width="270" Foreground="{DynamicResource PaperInk}"/>
                     </StackPanel>
                 </DataTemplate>
             </ListBox.ItemTemplate>

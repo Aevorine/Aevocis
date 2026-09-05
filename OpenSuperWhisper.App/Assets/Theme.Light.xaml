@@ -1,0 +1,12 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 方向 B - 纸感 Paper（浅色）：原 App.xaml 内联的色板，拆成可热切换的资源字典。 -->
+    <SolidColorBrush x:Key="PaperBackground" Color="#FAF7F0"/>
+    <SolidColorBrush x:Key="PaperHeader" Color="#EFE9DC"/>
+    <SolidColorBrush x:Key="PaperSurface" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="PaperBorder" Color="#E6DED0"/>
+    <SolidColorBrush x:Key="PaperInk" Color="#2C2924"/>
+    <SolidColorBrush x:Key="PaperMuted" Color="#7A7263"/>
+    <SolidColorBrush x:Key="PaperAccent" Color="#4D6A5A"/>
+    <SolidColorBrush x:Key="PaperAccentForeground" Color="#FAF7F0"/>
+</ResourceDictionary>

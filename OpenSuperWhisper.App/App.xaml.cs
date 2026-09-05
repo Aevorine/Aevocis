@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using Hardcodet.Wpf.TaskbarNotification;
+using Microsoft.Win32;
 using OpenSuperWhisper.Audio;
 using OpenSuperWhisper.Core;
 using OpenSuperWhisper.Core.Models;
@@ -103,6 +104,13 @@ public partial class App : Application
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Log.Info($"进程启动，t={StartupStopwatch.ElapsedMilliseconds}ms");
+
+        // G27: apply the system's current light/dark choice before any window is created, then
+        // keep following it live (user flips the Windows "深色模式" toggle without restarting the
+        // app) via SystemEvents.UserPreferenceChanged - every window's XAML was switched to
+        // DynamicResource specifically so this repaints already-open windows, not just new ones.
+        ApplySystemTheme();
+        SystemEvents.UserPreferenceChanged += OnSystemUserPreferenceChanged;
 
         // F18: idle by default (including during model loading below - that's a one-time cost,
         // not the repeated "listening" cost this is meant to protect against) so the app stays
@@ -470,6 +478,39 @@ public partial class App : Application
         }
     }
 
+    /// <summary>G27: reads the current Windows light/dark choice (per-user, the same key the
+    /// Settings > 个性化 > 颜色 page writes) and swaps the app's merged theme dictionary to match.
+    /// Missing key (older Windows builds that predate this setting) falls back to light, matching
+    /// the app's original default look.</summary>
+    private static void ApplySystemTheme()
+    {
+        var isLight = true;
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (key?.GetValue("AppsUseLightTheme") is int value)
+                isLight = value != 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("读取系统深色模式设置失败，回退为浅色", ex);
+        }
+
+        var uri = new Uri(isLight ? "Assets/Theme.Light.xaml" : "Assets/Theme.Dark.xaml", UriKind.Relative);
+        var dictionaries = Current.Resources.MergedDictionaries;
+        dictionaries[0] = new ResourceDictionary { Source = uri };
+        Log.Info($"主题已应用：{(isLight ? "浅色" : "深色")}（跟随系统）");
+    }
+
+    /// <summary>SystemEvents fires UserPreferenceChanged for many unrelated categories (mouse
+    /// settings, keyboard layout, etc.) - re-reading and reapplying the theme on every one of
+    /// them is cheap (a registry read + a dictionary swap) so there's no need to filter by
+    /// category, and it guarantees this never misses whichever category Windows files the dark
+    /// mode toggle under on a given version.</summary>
+    private void OnSystemUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e) =>
+        Dispatcher.Invoke(ApplySystemTheme);
+
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log.Error("未处理的 UI 线程异常", e.Exception);
@@ -689,6 +730,10 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        // SystemEvents.UserPreferenceChanged is a static/OS-level event - not unsubscribing would
+        // leak this App instance for the lifetime of the process' static event table (harmless
+        // for a normal single-instance run that's about to exit anyway, but cheap to do right).
+        SystemEvents.UserPreferenceChanged -= OnSystemUserPreferenceChanged;
         _overlayHideFallbackTimer?.Stop();
         _controller?.Dispose();
         _toggleWindowHotkey?.Dispose(); // F32
