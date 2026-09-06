@@ -13,6 +13,7 @@ pub mod history;
 pub mod hotkey;
 pub mod hotkey_capture;
 pub mod inject;
+pub mod onboarding;
 pub mod priority;
 pub mod recognizer;
 pub mod resource_usage;

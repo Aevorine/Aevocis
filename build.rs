@@ -31,6 +31,7 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set (build.rs must run via cargo)");
     for (slint_path, out_name) in [
         ("ui/settings_window.slint", "settings_window_ui.rs"),
+        ("ui/onboarding_window.slint", "onboarding_window.rs"),
     ] {
         slint_build::compile_with_output_path(
             slint_path,
