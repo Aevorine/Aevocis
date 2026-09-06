@@ -8,16 +8,19 @@
 pub mod app_info;
 pub mod audio;
 pub mod autostart;
+pub mod crash_reporter;
 pub mod history;
 pub mod hotkey;
 pub mod hotkey_capture;
 pub mod inject;
+pub mod priority;
 pub mod recognizer;
 pub mod resource_usage;
 pub mod settings;
 pub mod settings_window;
 pub mod show_hide_hotkey;
 pub mod target;
+pub mod update;
 pub mod voice;
 
 use std::path::PathBuf;
