@@ -14,6 +14,7 @@ pub mod recognizer;
 pub mod settings;
 pub mod show_hide_hotkey;
 pub mod target;
+pub mod voice;
 
 use std::path::PathBuf;
 
