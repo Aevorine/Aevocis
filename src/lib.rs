@@ -5,13 +5,17 @@
 //! these pieces are wired together, and `native/src/main.cpp` for the
 //! reference design this replicates in idiomatic Rust (not copied).
 
+pub mod app_info;
 pub mod audio;
 pub mod autostart;
 pub mod history;
 pub mod hotkey;
+pub mod hotkey_capture;
 pub mod inject;
 pub mod recognizer;
+pub mod resource_usage;
 pub mod settings;
+pub mod settings_window;
 pub mod show_hide_hotkey;
 pub mod target;
 

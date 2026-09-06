@@ -18,7 +18,27 @@
 //! icon's right-click menu renders with modern Windows visual styles instead
 //! of the unthemed Windows 2000-era default.
 fn main() {
+    // `slint::include_modules!()` in `main.rs` only ever pulls in whichever
+    // `compile()` call ran LAST (it works by reading a single env var that
+    // each call overwrites) -- so `MainWindow`/`HistoryEntry` must stay the
+    // one plain `compile()` call, and every additional top-level window below
+    // uses `compile_with_output_path` into its own named output file, manually
+    // pulled in via a plain `include!(concat!(env!("OUT_DIR"), "/<name>.rs"))`
+    // at the top of that window's own Rust controller module (see
+    // `src/settings_window.rs`, `src/term_dictionary_window.rs`, etc.).
     slint_build::compile("ui/main_window.slint").expect("Slint build failed");
+
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set (build.rs must run via cargo)");
+    for (slint_path, out_name) in [
+        ("ui/settings_window.slint", "settings_window_ui.rs"),
+    ] {
+        slint_build::compile_with_output_path(
+            slint_path,
+            std::path::Path::new(&out_dir).join(out_name),
+            slint_build::CompilerConfiguration::default(),
+        )
+        .unwrap_or_else(|e| panic!("Slint build failed for {slint_path}: {e:?}"));
+    }
 
     println!("cargo:rerun-if-changed=assets/app.ico");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

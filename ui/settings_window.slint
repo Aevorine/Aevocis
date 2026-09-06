@@ -1,0 +1,245 @@
+// Settings window: mirrors the shipping C# app's `SettingsWindow` (scrolled
+// single column of controls), minus the controls that only made sense for
+// its dual-engine (SenseVoice+Whisper) design -- see native-rust/SPEC.md's
+// "Explicit descopes" section. Every value the user can change is exposed as
+// an in-out property bound directly to its control (checkbox/combobox/text
+// edit), so `save()` firing is the only moment Rust needs to read them all
+// back out -- no per-keystroke callback plumbing needed for most of this
+// window.
+
+import { ScrollView, CheckBox, ComboBox, TextEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export component SettingsWindow inherits Window {
+    title: "设置";
+    width: 460px;
+    height: 680px;
+    background: Theme.background;
+
+    in-out property <string> ptt-key-label: "右 Ctrl";
+    // Raw VK codes, carried alongside the display labels above so `save()`
+    // has the actual numbers to persist -- kept in sync by whoever wires
+    // `capture-ptt-key()`/`capture-show-hide-key()` (see `src/settings_window.rs`).
+    in-out property <int> ptt-key-vk: 0xA3;
+    in-out property <bool> ptt-mode-toggle: false;
+    in-out property <string> show-hide-key-label: "Ctrl+Alt+H";
+    in-out property <int> show-hide-key-vk: 0x48;
+    in-out property <int> show-hide-modifiers: 0x0003;
+    in property <[string]> microphone-options: ["系统默认"];
+    in-out property <int> microphone-selected-index: 0;
+    in-out property <bool> autostart-enabled: false;
+    in-out property <bool> autocorrect-enabled: true;
+    in-out property <bool> draft-confirm-enabled: false;
+    in property <[string]> retention-options: ["永久保留", "7 天", "30 天", "90 天"];
+    in-out property <int> retention-selected-index: 0;
+    in property <string> resource-usage-text: "内存 -- MB · CPU --%";
+    in-out property <string> app-hotkeys-text: "";
+    in-out property <string> voice-commands-text: "";
+    in-out property <string> voice-macros-text: "";
+
+    callback capture-ptt-key();
+    callback capture-show-hide-key();
+    callback open-term-dictionary();
+    callback export-settings();
+    callback import-settings();
+    callback cancel();
+    callback save();
+
+    Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: 48px;
+        background: Theme.surface;
+        Text {
+            x: 16px; y: 0px; height: parent.height;
+            vertical-alignment: center;
+            text: "设置";
+            font-size: 16px;
+            font-weight: 600;
+            color: Theme.ink;
+        }
+        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.border; }
+    }
+
+    ScrollView {
+        x: 0px; y: 48px; width: parent.width; height: parent.height - 48px - 56px;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 18px;
+            alignment: start;
+
+            // --- push-to-talk ---
+            VerticalLayout {
+                spacing: 6px;
+                Text { text: "按住说话热键"; font-size: 12px; color: Theme.muted; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: ptt-key-label; font-size: 14px; color: Theme.ink; vertical-alignment: center; }
+                    Rectangle {
+                        width: 64px; height: 28px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        Text { text: "更改"; font-size: 12px; color: Theme.accent; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { capture-ptt-key(); } }
+                    }
+                }
+                Text { text: "触发方式"; font-size: 12px; color: Theme.muted; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        width: 80px; height: 28px;
+                        border-radius: 6px;
+                        background: ptt-mode-toggle ? Theme.background : Theme.accent;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        Text { text: "按住"; font-size: 12px; color: ptt-mode-toggle ? Theme.muted : Theme.accent-foreground; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { ptt-mode-toggle = false; } }
+                    }
+                    Rectangle {
+                        width: 80px; height: 28px;
+                        border-radius: 6px;
+                        background: ptt-mode-toggle ? Theme.accent : Theme.background;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        Text { text: "切换"; font-size: 12px; color: ptt-mode-toggle ? Theme.accent-foreground : Theme.muted; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { ptt-mode-toggle = true; } }
+                    }
+                }
+            }
+
+            // --- show/hide hotkey ---
+            VerticalLayout {
+                spacing: 6px;
+                Text { text: "显示/隐藏主界面热键"; font-size: 12px; color: Theme.muted; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: show-hide-key-label; font-size: 14px; color: Theme.ink; vertical-alignment: center; }
+                    Rectangle {
+                        width: 64px; height: 28px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        Text { text: "更改"; font-size: 12px; color: Theme.accent; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { capture-show-hide-key(); } }
+                    }
+                }
+            }
+
+            // --- microphone ---
+            VerticalLayout {
+                spacing: 6px;
+                Text { text: "麦克风"; font-size: 12px; color: Theme.muted; }
+                ComboBox {
+                    model: microphone-options;
+                    current-index: microphone-selected-index;
+                    selected(value) => { microphone-selected-index = self.current-index; }
+                }
+            }
+
+            // --- toggles ---
+            CheckBox { text: "开机自启"; checked: autostart-enabled; toggled => { autostart-enabled = self.checked; } }
+            CheckBox { text: "自动补全句末标点"; checked: autocorrect-enabled; toggled => { autocorrect-enabled = self.checked; } }
+            CheckBox { text: "注入前先确认草稿"; checked: draft-confirm-enabled; toggled => { draft-confirm-enabled = self.checked; } }
+
+            // --- history retention ---
+            VerticalLayout {
+                spacing: 6px;
+                Text { text: "历史记录保留时长"; font-size: 12px; color: Theme.muted; }
+                ComboBox {
+                    model: retention-options;
+                    current-index: retention-selected-index;
+                    selected(value) => { retention-selected-index = self.current-index; }
+                }
+            }
+
+            // --- resource usage ---
+            Text { text: resource-usage-text; font-size: 12px; color: Theme.muted; }
+
+            // --- term dictionary / export / import ---
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    height: 30px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    Text { text: "编辑专业词典"; font-size: 12px; color: Theme.ink; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { open-term-dictionary(); } }
+                }
+                Rectangle {
+                    height: 30px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    Text { text: "导出设置"; font-size: 12px; color: Theme.ink; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { export-settings(); } }
+                }
+                Rectangle {
+                    height: 30px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    Text { text: "导入设置"; font-size: 12px; color: Theme.ink; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { import-settings(); } }
+                }
+            }
+
+            Text {
+                text: "语音识别完全在本机进行，不联网、不上传录音或文字到任何服务器。";
+                font-size: 11px;
+                color: Theme.muted;
+                wrap: word-wrap;
+            }
+
+            // --- app-specific hotkeys ---
+            VerticalLayout {
+                spacing: 6px;
+                Text { text: "按应用切换热键（每行一条：进程名|按键，如 code|F9）"; font-size: 11px; color: Theme.muted; wrap: word-wrap; }
+                TextEdit { height: 64px; font-family: "Consolas"; font-size: 12px; text <=> app-hotkeys-text; wrap: word-wrap; }
+            }
+
+            // --- voice commands ---
+            VerticalLayout {
+                spacing: 6px;
+                Text { text: "语音命令（每行一条：动作|触发词，动作为 取消/换行/大写后缀）"; font-size: 11px; color: Theme.muted; wrap: word-wrap; }
+                TextEdit { height: 72px; font-family: "Consolas"; font-size: 12px; text <=> voice-commands-text; wrap: word-wrap; }
+            }
+
+            // --- voice macros ---
+            VerticalLayout {
+                spacing: 6px;
+                Text { text: "语音宏（每行一条：触发短语|动作:值;动作:值...，动作为 打开/打字/按键）"; font-size: 11px; color: Theme.muted; wrap: word-wrap; }
+                TextEdit { height: 72px; font-family: "Consolas"; font-size: 12px; text <=> voice-macros-text; wrap: word-wrap; }
+            }
+        }
+    }
+
+    Rectangle {
+        x: 0px; y: parent.height - 56px; width: parent.width; height: 56px;
+        background: Theme.surface;
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.border; }
+
+        HorizontalLayout {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            padding: 12px;
+            spacing: 8px;
+            alignment: end;
+
+            Rectangle {
+                width: 72px; height: 32px;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Theme.border;
+                Text { text: "取消"; font-size: 13px; color: Theme.ink; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { cancel(); } }
+            }
+            Rectangle {
+                width: 72px; height: 32px;
+                border-radius: 6px;
+                background: Theme.accent;
+                Text { text: "保存"; font-size: 13px; color: Theme.accent-foreground; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { save(); } }
+            }
+        }
+    }
+}
