@@ -20,11 +20,11 @@ export component SettingsWindow inherits Window {
     // Raw VK codes, carried alongside the display labels above so `save()`
     // has the actual numbers to persist -- kept in sync by whoever wires
     // `capture-ptt-key()`/`capture-show-hide-key()` (see `src/settings_window.rs`).
-    in-out property <int> ptt-key-vk: 0xA3;
+    in-out property <int> ptt-key-vk: 163; // VK_RCONTROL (0xA3)
     in-out property <bool> ptt-mode-toggle: false;
     in-out property <string> show-hide-key-label: "Ctrl+Alt+H";
-    in-out property <int> show-hide-key-vk: 0x48;
-    in-out property <int> show-hide-modifiers: 0x0003;
+    in-out property <int> show-hide-key-vk: 72; // VK_H (0x48)
+    in-out property <int> show-hide-modifiers: 3; // MOD_CONTROL|MOD_ALT (0x0003)
     in property <[string]> microphone-options: ["系统默认"];
     in-out property <int> microphone-selected-index: 0;
     in-out property <bool> autostart-enabled: false;
