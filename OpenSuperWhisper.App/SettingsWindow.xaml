@@ -126,19 +126,18 @@
                        Foreground="{DynamicResource PaperInk}" TextWrapping="Wrap" MaxWidth="340"/>
         </CheckBox>
 
-        <CheckBox x:Name="TermLearningEnabledCheckBox" Grid.Row="16" Margin="0,0,0,12" VerticalContentAlignment="Top">
-            <TextBlock x:Name="TermLearningEnabledLabel"
-                       Text="从上方确认框里的修改自动学习专业词典（同一处修改反复出现 3 次以上会自动加入词典，并有托盘提示；需先勾选上面「先弹出确认框」）"
+        <CheckBox x:Name="TermLearningEnabledCheckBox" Grid.Row="16" Margin="0,0,0,12" VerticalContentAlignment="Top"
+                  ToolTip="同一处修改反复出现 3 次以上会自动加入专业词典，并有托盘提示；需先勾选上面「先弹出确认框」">
+            <TextBlock x:Name="TermLearningEnabledLabel" Text="从确认框里的修改自动学习专业词典"
                        Foreground="{DynamicResource PaperInk}" TextWrapping="Wrap" MaxWidth="340"/>
         </CheckBox>
 
         <StackPanel Grid.Row="17" Margin="0,0,0,16">
-            <TextBlock Text="按软件自动调语气（F06）" FontWeight="Bold" Foreground="{DynamicResource PaperInk}" Margin="0,0,0,2"/>
-            <TextBlock Text="每行一条，格式：进程名|提示词。进程名是任务管理器里显示的名字，不含 .exe（如 WeChat、Code）。不配置=不受影响。"
-                       Foreground="{DynamicResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <TextBlock Text="按软件自动调语气" FontWeight="Bold" Foreground="{DynamicResource PaperInk}" Margin="0,0,0,4"/>
             <TextBox x:Name="AppPromptsTextBox" Height="80" AcceptsReturn="True" TextWrapping="NoWrap"
                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                     FontFamily="Consolas" FontSize="12"/>
+                     FontFamily="Consolas" FontSize="12"
+                     ToolTip="每行一条，格式：进程名|提示词。进程名是任务管理器里显示的名字，不含 .exe（如 WeChat、Code）。不配置=不受影响。"/>
             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                 <TextBlock Text="快速添加预设：" VerticalAlignment="Center" Foreground="{DynamicResource PaperMuted}" FontSize="11" Margin="0,0,4,0"/>
                 <Button Content="微信" Tag="0" Width="50" Height="22" Margin="0,0,4,0" Click="PromptPreset_Click"/>
@@ -148,31 +147,28 @@
         </StackPanel>
 
         <StackPanel Grid.Row="18" Margin="0,0,0,16">
-            <TextBlock Text="按软件单独设置快捷键（F12）" FontWeight="Bold" Foreground="{DynamicResource PaperInk}" Margin="0,0,0,2"/>
-            <TextBlock Text="每行一条，格式：进程名|按键名（如 F13、Oem3）。未列出的软件继续使用上方的全局按键，不受影响。"
-                       Foreground="{DynamicResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <TextBlock Text="按软件单独设置快捷键" FontWeight="Bold" Foreground="{DynamicResource PaperInk}" Margin="0,0,0,4"/>
             <TextBox x:Name="AppHotkeysTextBox" Height="60" AcceptsReturn="True" TextWrapping="NoWrap"
                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                     FontFamily="Consolas" FontSize="12"/>
+                     FontFamily="Consolas" FontSize="12"
+                     ToolTip="每行一条，格式：进程名|按键名（如 F13、Oem3）。未列出的软件继续使用上方的全局按键，不受影响。"/>
         </StackPanel>
 
         <TextBlock Grid.Row="19" Text="口头命令（说出来直接执行，不会被打出来）：" FontWeight="Bold"
                    Foreground="{DynamicResource PaperInk}" Margin="0,0,0,4"/>
-        <TextBox x:Name="VoiceCommandsTextBox" Grid.Row="20" Height="90" Margin="0,0,0,4"
+        <TextBox x:Name="VoiceCommandsTextBox" Grid.Row="20" Height="90" Margin="0,0,0,16"
                  AcceptsReturn="True" TextWrapping="NoWrap"
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                 FontFamily="Consolas" FontSize="12"/>
-        <TextBlock Grid.Row="21" Text="每行一条，格式：动作|触发词，动作可选：取消 / 换行 / 大写后缀（大写后缀命中句尾，转写句尾之前那部分文字为大写后再打出来）。"
-                   Foreground="{DynamicResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
+                 FontFamily="Consolas" FontSize="12"
+                 ToolTip="每行一条，格式：动作|触发词，动作可选：取消 / 换行 / 大写后缀（大写后缀命中句尾，转写句尾之前那部分文字为大写后再打出来）。"/>
 
         <TextBlock Grid.Row="22" Text="语音宏（说出触发短语，一次执行「切软件+打字」等一串动作）：" FontWeight="Bold"
                    Foreground="{DynamicResource PaperInk}" Margin="0,0,0,4"/>
         <TextBox x:Name="MacrosTextBox" Grid.Row="23" Height="90" Margin="0,0,0,4"
                  AcceptsReturn="True" TextWrapping="NoWrap"
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                 FontFamily="Consolas" FontSize="12"/>
-        <TextBlock Grid.Row="24" Text="每行一条，格式：触发短语|动作类型:值;动作类型:值...，动作类型可选：打开(程序路径或程序名) / 打字(要打的文字) / 按键(如 Enter)。例：打开微信说早上好|打开:WeChat.exe;打字:早上好"
-                   Foreground="{DynamicResource PaperMuted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                 FontFamily="Consolas" FontSize="12"
+                 ToolTip="每行一条，格式：触发短语|动作类型:值;动作类型:值...，动作类型可选：打开(程序路径或程序名) / 打字(要打的文字) / 按键(如 Enter)。例：打开微信说早上好|打开:WeChat.exe;打字:早上好"/>
         </Grid>
         </ScrollViewer>
 

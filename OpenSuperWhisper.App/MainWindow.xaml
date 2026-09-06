@@ -5,7 +5,7 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize"
         Background="{DynamicResource PaperBackground}"
-        FontFamily="Segoe UI"
+        FontFamily="Times New Roman, SimSun"
         Icon="Assets/aevocis-logo.png">
     <DockPanel>
         <!-- No in-content brand-name label here on purpose: the OS title bar/taskbar/Alt-Tab

@@ -14,9 +14,16 @@
                 <ResourceDictionary Source="Assets/Theme.Light.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
+            <!-- Unified app-wide typography: WPF's composite FontFamily list renders each
+                 character with the first font in the list that has a glyph for it, so Latin
+                 letters/digits/punctuation render in Times New Roman while CJK characters fall
+                 through to SimSun - one setting, no per-string language detection needed. This is
+                 an implicit style (no x:Key), so every Window/TextBlock/Button in the app inherits
+                 it unless a window explicitly overrides FontFamily (WPF's FontFamily is an
+                 inherited dependency property). -->
             <Style TargetType="Window">
                 <Setter Property="Background" Value="{DynamicResource PaperBackground}"/>
-                <Setter Property="FontFamily" Value="Segoe UI"/>
+                <Setter Property="FontFamily" Value="Times New Roman, SimSun"/>
             </Style>
 
             <Style TargetType="TextBlock">

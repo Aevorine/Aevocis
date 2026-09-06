@@ -30,7 +30,7 @@
                 <Rectangle x:Name="Bar4" Width="3" Height="3" Fill="{DynamicResource PaperAccent}" VerticalAlignment="Center" RadiusX="1.5" RadiusY="1.5"/>
             </StackPanel>
             <TextBlock x:Name="StatusText" Text="正在听..." Foreground="{DynamicResource PaperInk}"
-                       FontSize="13" FontFamily="Segoe UI" VerticalAlignment="Center"
+                       FontSize="13" FontFamily="Times New Roman, SimSun" VerticalAlignment="Center"
                        MaxWidth="480" TextWrapping="Wrap"/>
         </StackPanel>
     </Border>

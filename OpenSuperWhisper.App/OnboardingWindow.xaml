@@ -11,29 +11,27 @@
         Icon="Assets/aevocis-logo.png">
     <Grid Margin="24">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="欢迎使用 Aevocis" FontSize="18" FontFamily="Georgia"
-                   Foreground="{DynamicResource PaperInk}" Margin="0,0,0,20"/>
-
-        <StackPanel Grid.Row="1" VerticalAlignment="Center">
+        <!-- No repeated "欢迎使用 Aevocis" heading here on purpose: the window's own title bar
+             (Title="欢迎使用 Aevocis" above) already says it. -->
+        <StackPanel Grid.Row="0" VerticalAlignment="Center">
             <TextBlock x:Name="TitleText" FontSize="16" FontWeight="Bold"
                        Foreground="{DynamicResource PaperInk}" Margin="0,0,0,10"/>
             <TextBlock x:Name="BodyText" FontSize="13" TextWrapping="Wrap"
                        Foreground="{DynamicResource PaperMuted}" LineHeight="20"/>
         </StackPanel>
 
-        <StackPanel Grid.Row="2" x:Name="Dots" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,16">
+        <StackPanel Grid.Row="1" x:Name="Dots" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,16">
             <Ellipse Width="8" Height="8" Margin="4,0"/>
             <Ellipse Width="8" Height="8" Margin="4,0"/>
             <Ellipse Width="8" Height="8" Margin="4,0"/>
         </StackPanel>
 
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>

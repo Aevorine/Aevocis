@@ -15,12 +15,12 @@
     <Border Background="{DynamicResource PaperBackground}" BorderBrush="{DynamicResource PaperAccent}"
             BorderThickness="1.5" CornerRadius="14" Padding="16,12">
         <StackPanel>
-            <TextBlock Text="识别结果（可编辑）" FontSize="12" FontFamily="Segoe UI"
+            <TextBlock Text="识别结果（可编辑）" FontSize="12" FontFamily="Times New Roman, SimSun"
                        Foreground="{DynamicResource PaperMuted}" Margin="0,0,0,6"/>
             <TextBox x:Name="DraftTextBox"
                      AcceptsReturn="False"
                      TextWrapping="Wrap"
-                     FontSize="14" FontFamily="Segoe UI"
+                     FontSize="14" FontFamily="Times New Roman, SimSun"
                      Foreground="{DynamicResource PaperInk}"
                      Background="{DynamicResource PaperSurface}"
                      BorderBrush="{DynamicResource PaperBorder}"
@@ -28,7 +28,7 @@
                      MinHeight="52" MaxHeight="220"
                      VerticalScrollBarVisibility="Auto"/>
             <TextBlock Text="回车：确认并打进去　　Esc：取消这次听写"
-                       FontSize="11" FontFamily="Segoe UI"
+                       FontSize="11" FontFamily="Times New Roman, SimSun"
                        Foreground="{DynamicResource PaperMuted}" Margin="0,8,0,0"/>
         </StackPanel>
     </Border>

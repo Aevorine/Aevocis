@@ -568,17 +568,34 @@ public partial class App : Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        // Must run before anything else here: this handler always lets the exception continue
+        // (e.Handled is never set), so the process is about to die. If the notification-area icon
+        // isn't explicitly torn down (Shell_NotifyIcon NIM_DELETE, which TaskbarIcon.Dispose does)
+        // before that happens, Explorer leaves a stale "ghost" icon behind - the process is gone
+        // but its tray icon lingers until the user hovers over it or Explorer restarts. This is
+        // what made every crash look like "duplicate tray icons pile up on repeated launches".
+        RemoveTrayIconForCrash();
         Log.Error("未处理的 UI 线程异常", e.Exception);
         CrashReporter.Write(e.Exception, "UI 线程未处理异常");
     }
 
     private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
+        if (e.IsTerminating) RemoveTrayIconForCrash();
         Log.Error(
             e.IsTerminating ? "未处理的进程级异常（进程即将终止）" : "未处理的进程级异常",
             e.ExceptionObject as Exception);
         if (e.ExceptionObject is Exception ex)
             CrashReporter.Write(ex, e.IsTerminating ? "进程级未处理异常（即将终止）" : "进程级未处理异常");
+    }
+
+    /// <summary>Best-effort, crash-path-only tray icon teardown - see call sites. Never throws:
+    /// a failure while already handling a crash must not mask the original exception or prevent
+    /// the crash report from being written.</summary>
+    private void RemoveTrayIconForCrash()
+    {
+        try { _trayIcon?.Dispose(); }
+        catch (Exception ex) { Log.Error("崩溃路径下清理托盘图标失败", ex); }
     }
 
     /// <summary>
