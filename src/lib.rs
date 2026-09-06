@@ -6,31 +6,58 @@
 //! reference design this replicates in idiomatic Rust (not copied).
 
 pub mod audio;
+pub mod autostart;
+pub mod history;
 pub mod hotkey;
 pub mod inject;
 pub mod recognizer;
+pub mod show_hide_hotkey;
 pub mod target;
 
 use std::path::PathBuf;
 
-/// Dev-machine fallback location of the SenseVoice-small int8 weights already
-/// shipped with the WPF app (v1.2.0's "闪电引擎" / lightning engine). The
-/// ~237MB `.onnx` file is intentionally not vendored into this repo. Override
-/// with the `OSW_SENSEVOICE_MODEL_DIR` environment variable on any other
-/// machine, or once this becomes a packaged build.
+/// Dev-machine-only fallback location of the SenseVoice-small int8 weights,
+/// used only when neither an installed (exe-relative) copy nor an explicit
+/// override is found -- see `resolve_model_dir`. The ~237MB `.onnx` file is
+/// intentionally not vendored into this repo.
 pub const DEV_DEFAULT_MODEL_DIR: &str =
     r"D:\Documents\WorkDocuments\Github\Fork\OpenSuperWhisper\src-reference\OpenSuperWhisper.App\Models\sensevoice";
 
-/// Resolves the SenseVoice model directory: `OSW_SENSEVOICE_MODEL_DIR` env var
-/// first, then the known dev-machine path if it actually has the model file,
-/// then a relative `models/sensevoice` for a future packaged layout.
+/// Resolves the SenseVoice model directory, in priority order:
+/// 1. `OSW_SENSEVOICE_MODEL_DIR` env var (explicit override always wins).
+/// 2. `models\sensevoice` next to the running exe -- this is the real,
+///    portable path an installed copy uses (the installer places the model
+///    files there), resolved via `current_exe()` rather than the process's
+///    current working directory so it works regardless of how the exe was
+///    launched (double-click, Start Menu shortcut, `cmd.exe` from elsewhere).
+/// 3. The known absolute dev-machine path, purely so this exact checkout
+///    keeps working without extra setup while iterating.
 pub fn resolve_model_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("OSW_SENSEVOICE_MODEL_DIR") {
         return PathBuf::from(dir);
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        let packaged = exe_dir.join("models").join("sensevoice");
+        if packaged.join("model.int8.onnx").is_file() {
+            return packaged;
+        }
     }
     let dev_default = PathBuf::from(DEV_DEFAULT_MODEL_DIR);
     if dev_default.join("model.int8.onnx").is_file() {
         return dev_default;
     }
     PathBuf::from("models/sensevoice")
+}
+
+/// Resolves (and ensures exists) the per-user app-data directory
+/// `%LOCALAPPDATA%\Aevocis`, where `history.json` lives. Falls back to the
+/// current directory if `LOCALAPPDATA` is somehow unset (never observed on
+/// real Windows, but must not panic if it happens).
+pub fn app_data_dir() -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
+    let dir = PathBuf::from(base).join("Aevocis");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }

@@ -1,1 +1,26 @@
+# Build outputs (includes target/sherpa-onnx-prebuilt/, the ~115MB prebuilt
+# static libs fetched by sherpa-onnx-sys's build script)
 /target
+
+# Installer output (installer/Aevocis.iss product) -- a ~157MB exe that
+# bundles the SenseVoice model; regenerate with ISCC rather than commit it.
+/dist
+
+# Local working/session artifacts — never upload. These are machine-local and
+# pinned to absolute file:// paths on this dev box. This is not hypothetical:
+# the sibling C# repo (src-reference) committed .lavish/.pin.json before it was
+# ignored, and that developer-local absolute path is now permanently in the
+# public Aevocis git history. Ignore them here BEFORE this repo ever gets a
+# remote.
+.lavish/
+.claude/
+
+# Local run logs — these capture resolved model paths, i.e. absolute paths on
+# the dev machine (see run_stdout.log's "Loading SenseVoice model from D:\...").
+run_stdout.log
+run_stderr.log
+*.log
+
+# OS cruft
+Thumbs.db
+.DS_Store

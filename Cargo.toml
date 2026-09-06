@@ -1,11 +1,20 @@
 [package]
 name = "osw_native"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
 sherpa-onnx = "1.13.7"
 slint = { version = "1.17.1", features = ["raw-window-handle-06"] }
-windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_Media_Audio", "Win32_Graphics_Gdi", "Win32_System_Threading"] }
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_Media_Audio", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_System_SystemInformation"] }
 cpal = "0.15"
 raw-window-handle = "0.6"
+tray-icon = { version = "0.24.2", default-features = false, features = ["common-controls-v6"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "ico"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+winreg = "0.56.0"
+
+[build-dependencies]
+slint-build = "1.17.1"
+winresource = "0.1.31"
