@@ -10,10 +10,13 @@ pub mod autostart;
 pub mod history;
 pub mod hotkey;
 pub mod inject;
+pub mod punctuation;
 pub mod recognizer;
 pub mod settings;
 pub mod show_hide_hotkey;
 pub mod target;
+pub mod term_dictionary;
+pub mod term_dictionary_window;
 
 use std::path::PathBuf;
 
