@@ -3799,6 +3799,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tray-icon",
+ "ureq",
  "windows 0.62.2",
  "winreg",
  "winresource",
@@ -5653,6 +5654,8 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

@@ -8,8 +8,9 @@
 // Design reference (behavior, not code): `src-reference/OpenSuperWhisper.App/MainWindow.xaml`.
 
 import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
 
-// One entry in the (placeholder, see `history` below) recent-dictation list.
+// One entry in the real (see `src/history.rs`) recent-dictation list.
 export struct HistoryEntry {
     time: string,
     text: string,
@@ -20,22 +21,25 @@ export component MainWindow inherits Window {
     icon: @image-url("../assets/app.png");
     width: 380px;
     height: 560px;
-    background: #f6f3ec;
+    background: Theme.background;
 
     // Driven from Rust: reuses the same phase wording as the Overlay
     // ("就绪" / "正在听" / "正在识别" / ...), see `main.rs::phase_label`.
     in property <string> status-text: "就绪";
-    // Placeholder data only -- real history persistence is out of scope for
-    // this shell (see the section label below), this just proves the layout.
     in property <[HistoryEntry]> history: [];
+    // Emitted when the user clicks the header's gear icon / history footer's
+    // "清空" button -- `main.rs` opens the settings window / clears history.
+    callback open-settings();
+    callback clear-history();
 
-    // Header: brand + live status dot, mirrors MainWindow.xaml's top border.
+    // Header: brand + live status dot + settings gear, mirrors
+    // MainWindow.xaml's top border.
     Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
         height: 54px;
-        background: #ffffff;
+        background: Theme.surface;
 
         Text {
             x: 16px;
@@ -45,20 +49,36 @@ export component MainWindow inherits Window {
             text: "Aevocis";
             font-size: 17px;
             font-weight: 600;
-            color: #2b2620;
+            color: Theme.ink;
+        }
+
+        settings-gear := Text {
+            x: parent.width - 34px;
+            y: 0px;
+            width: 24px;
+            height: parent.height;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            text: "⚙";
+            font-size: 16px;
+            color: Theme.muted;
+
+            TouchArea {
+                clicked => { open-settings(); }
+            }
         }
 
         Rectangle {
-            x: parent.width - 122px;
+            x: parent.width - 150px;
             y: (parent.height - 8px) / 2;
             width: 8px;
             height: 8px;
             border-radius: 4px;
-            background: #b08d57;
+            background: Theme.accent;
         }
 
         Text {
-            x: parent.width - 106px;
+            x: parent.width - 134px;
             y: 0px;
             width: 90px;
             height: parent.height;
@@ -66,7 +86,7 @@ export component MainWindow inherits Window {
             horizontal-alignment: right;
             text: status-text;
             font-size: 12px;
-            color: #8a8272;
+            color: Theme.muted;
         }
 
         Rectangle {
@@ -74,7 +94,7 @@ export component MainWindow inherits Window {
             y: parent.height - 1px;
             width: parent.width;
             height: 1px;
-            background: #e5ddcd;
+            background: Theme.border;
         }
     }
 
@@ -85,7 +105,7 @@ export component MainWindow inherits Window {
         y: 54px;
         width: parent.width;
         height: 128px;
-        background: #f6f3ec;
+        background: Theme.background;
 
         Rectangle {
             x: (parent.width - 72px) / 2;
@@ -93,7 +113,7 @@ export component MainWindow inherits Window {
             width: 72px;
             height: 72px;
             border-radius: 36px;
-            background: #b08d57;
+            background: Theme.accent;
         }
 
         Text {
@@ -103,24 +123,39 @@ export component MainWindow inherits Window {
             height: 34px;
             text: "按住右 Ctrl 说话，松开自动输入；Ctrl+Alt+H 或单击托盘图标可显示/隐藏";
             font-size: 11px;
-            color: #8a8272;
+            color: Theme.muted;
             horizontal-alignment: center;
             wrap: word-wrap;
         }
     }
 
-    // Recent-dictation list. Deliberately labelled as a placeholder: wiring
-    // real history persistence is out of scope for this GUI-shell task, this
-    // exists to prove the layout, not to ship fake data as if it were real.
+    // Recent-dictation list, backed by real persisted history
+    // (`src/history.rs`) -- no longer placeholder data.
     Text {
         x: 16px;
         y: 190px;
-        width: parent.width - 32px;
+        width: parent.width - 100px;
         height: 24px;
         vertical-alignment: center;
-        text: "最近（占位示例，尚未接入历史记录）";
+        text: "最近";
         font-size: 11px;
-        color: #8a8272;
+        color: Theme.muted;
+    }
+
+    clear-btn := Text {
+        x: parent.width - 60px;
+        y: 190px;
+        width: 44px;
+        height: 24px;
+        vertical-alignment: center;
+        horizontal-alignment: right;
+        text: "清空";
+        font-size: 11px;
+        color: Theme.accent;
+
+        TouchArea {
+            clicked => { clear-history(); }
+        }
     }
 
     Rectangle {
@@ -128,7 +163,7 @@ export component MainWindow inherits Window {
         y: 214px;
         width: parent.width;
         height: 1px;
-        background: #e5ddcd;
+        background: Theme.border;
     }
 
     ListView {
@@ -149,7 +184,7 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 text: entry.time;
                 font-size: 11px;
-                color: #8a8272;
+                color: Theme.muted;
             }
 
             Text {
@@ -160,7 +195,7 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 text: entry.text;
                 font-size: 13px;
-                color: #2b2620;
+                color: Theme.ink;
                 wrap: word-wrap;
             }
         }

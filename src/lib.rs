@@ -11,6 +11,7 @@ pub mod history;
 pub mod hotkey;
 pub mod inject;
 pub mod recognizer;
+pub mod settings;
 pub mod show_hide_hotkey;
 pub mod target;
 

@@ -1,0 +1,17 @@
+// Shared "纸感 Paper" palette, ported verbatim from the confirmed C# app theme
+// (src-reference/OpenSuperWhisper.App/Assets/Theme.Light.xaml) -- NOT the
+// slightly-off gold-accented palette main_window.slint originally shipped
+// with (#b08d57 was a placeholder guess, never actually the picked theme).
+// Every window in this app imports this file so the palette can only ever
+// drift by editing one place.
+
+export global Theme {
+    out property <color> background: #FAF7F0;
+    out property <color> header: #EFE9DC;
+    out property <color> surface: #FFFFFF;
+    out property <color> border: #E6DED0;
+    out property <color> ink: #2C2924;
+    out property <color> muted: #7A7263;
+    out property <color> accent: #4D6A5A;
+    out property <color> accent-foreground: #FAF7F0;
+}
