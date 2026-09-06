@@ -15,12 +15,15 @@ pub mod hotkey_capture;
 pub mod inject;
 pub mod onboarding;
 pub mod priority;
+pub mod punctuation;
 pub mod recognizer;
 pub mod resource_usage;
 pub mod settings;
 pub mod settings_window;
 pub mod show_hide_hotkey;
 pub mod target;
+pub mod term_dictionary;
+pub mod term_dictionary_window;
 pub mod update;
 pub mod voice;
 

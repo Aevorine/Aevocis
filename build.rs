@@ -32,6 +32,7 @@ fn main() {
     for (slint_path, out_name) in [
         ("ui/settings_window.slint", "settings_window_ui.rs"),
         ("ui/onboarding_window.slint", "onboarding_window.rs"),
+        ("ui/term_dictionary_window.slint", "term_dictionary_window.rs"),
     ] {
         slint_build::compile_with_output_path(
             slint_path,
