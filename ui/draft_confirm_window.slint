@@ -1,0 +1,81 @@
+// Draft-confirmation popup: shown instead of immediately injecting the
+// recognized text, when the (not-yet-wired, see integration) settings gate
+// for this feature is on. Non-modal, bottom-center of the screen, Enter
+// confirms (with whatever edits were made), Escape or any other dismissal
+// cancels. Positioning + native window styling happen from Rust in
+// `src/draft_confirm.rs`, since Slint's `Window` has no portable
+// "set position" API as of 1.17.
+//
+// Design reference (behavior, not code): the C# app's `DraftConfirmWindow`.
+
+import { LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export component DraftConfirmWindow inherits Window {
+    title: "确认草稿";
+    width: 420px;
+    height: 96px;
+    no-frame: true;
+    always-on-top: true;
+    background: Theme.surface;
+
+    in property <string> draft-text;
+    callback confirmed(string);
+    callback cancelled();
+
+    // Forwarding wrappers so Rust (`src/draft_confirm.rs`) can reach into the
+    // named `edit` child after `.show()` -- Slint's generated Rust API only
+    // exposes public functions/properties/callbacks declared on the root
+    // component itself, not arbitrary named child elements, so `edit`'s own
+    // (interface-forwarded, see `LineEdit`'s `select-all()`) functions are
+    // otherwise unreachable from outside this file.
+    public function focus-edit() {
+        edit.focus();
+    }
+
+    public function select-all() {
+        edit.select-all();
+    }
+
+    Rectangle {
+        border-width: 1px;
+        border-color: Theme.border;
+        border-radius: 8px;
+        background: Theme.surface;
+
+        edit := LineEdit {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 48px;
+            text: draft-text;
+            font-size: 14px;
+            accepted(text) => { confirmed(text); }
+            // `LineEdit`'s `key-pressed` callback is forwarded all the way up
+            // from its internal `TextInput` (see `lineedit-base.slint` ->
+            // `LineEditInterface`), so attaching a handler here intercepts
+            // key presses before the widget's own default text-editing
+            // behavior runs. Returning `accept` suppresses that default (so
+            // Escape never inserts/does anything to the text); `reject` lets
+            // every other key fall through to normal editing.
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    cancelled();
+                    accept
+                } else {
+                    reject
+                }
+            }
+        }
+
+        Text {
+            x: 12px;
+            y: parent.height - 30px;
+            width: parent.width - 24px;
+            height: 20px;
+            text: "Enter 确认 · Esc 取消";
+            font-size: 10px;
+            color: Theme.muted;
+        }
+    }
+}

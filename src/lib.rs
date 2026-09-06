@@ -9,6 +9,7 @@ pub mod app_info;
 pub mod audio;
 pub mod autostart;
 pub mod crash_reporter;
+pub mod draft_confirm;
 pub mod history;
 pub mod hotkey;
 pub mod hotkey_capture;
