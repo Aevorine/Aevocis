@@ -1,9 +1,9 @@
-# TECH_ROADMAP — native-rust feature-parity push (2026-09-06)
+# TECH_ROADMAP — native-rust Rust + Slint Windows delivery (2026-09-06)
 
 ## Why this work happened
-User asked whether the C#→Rust+Slint migration was complete. Verified against the actual repo
-(not memory): it was not — see `SPEC.md` for the full gap analysis against `src-reference/` (5745
-lines of C# + 6 XAML windows vs. native-rust's ~1244-line core loop).
+User asked whether the C#→Rust+Slint migration was complete. Verified against the actual repo,
+then repaired the Rust+Slint delivery path. The old C# implementation remains a reference only;
+the Windows release surface is `native-rust` and its Aevocis installer.
 
 ## Architecture decisions this round
 
@@ -41,15 +41,28 @@ partial-transcript streaming. Full reasoning in `SPEC.md`.
 settings-export.json` is used directly. Documented here rather than silently shipped as if it were
 a full dialog — a real Open/Save dialog is a reasonable follow-up, not a correctness issue.
 
-## Verification results (filled in as each piece lands — see git log for real commit-by-commit
-evidence; do not trust this file over `git log`/a real `cargo build` if they ever disagree)
-- `cargo check --lib` on master: clean after settings.rs, theme fix, audio/history extensions,
-  app_info.rs, resource_usage.rs, hotkey.rs rewrite, hotkey_capture.rs, settings_window.rs +
-  settings_window.slint (multi-window build.rs wiring confirmed working).
-- Parallel worktree agents (term-dict+punctuation, voice commands+macros, draft-confirm,
-  onboarding, crash-reporter+priority+update) — status tracked via their own commits on
-  `feature/*` branches; merged into master one at a time by the orchestrator with a real rebuild
-  after each merge (matching this project's established worktree-merge discipline from the C#
-  rewrite wave), not blind `git merge`.
-- Full end-to-end smoke test (real launch, real dictation) — pending until integration (main.rs
-  rewrite wiring all modules together) is complete.
+## Verification results
+
+- `cargo check` passed after the compile-fix, durable-storage, target-safety, single-instance,
+  update-thread, and SHA-256 changes.
+- `cargo build --release` passed and produced `target/release/osw_native.exe` with file version
+  `0.2.1`; the linker emitted the existing mixed-CRT `LNK4098` warning, but the executable started
+  and remained responsive. This warning is retained as a follow-up hardening item rather than
+  being hidden.
+- Inno Setup 6.7.3 compiled `dist/Aevocis-Setup-0.2.1.exe` successfully. An isolated silent
+  install created `Aevocis/Aevocis.exe`, the SenseVoice model, tokens, model license, and uninstaller;
+  the installed EXE loaded the model from its exe-relative path and remained responsive.
+- End-user launch smoke test passed: the release process loaded SenseVoice, armed both global
+  hotkeys, exposed the `Aevocis` window, and remained responsive. A second launch exited while the
+  first PID remained the only instance.
+- Dual-track verifier: silent failures 0; actual damage 0. Semgrep full tracked-source scan:
+  0 findings / 0 blocking. Gitleaks full history: 15 commits, 0 leaks.
+- `ensure-project-harness` was incompatible with the nested hidden `.git` directory during marker
+  detection; the local control plane was created manually and Harness Doctor now reports all four
+  required documents PASS.
+
+## Known boundaries and follow-up choices
+
+Android/tablet UI and a Claude Code JSON CLI bridge are not falsely claimed by this Windows EXE.
+They remain explicit choices M39/M40/M42 in `APP_METRICS.md`. The same file contains 44 measurable
+feature/performance/security candidates; only the P0 Windows delivery line is implemented here.

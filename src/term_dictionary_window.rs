@@ -30,7 +30,6 @@ use crate::term_dictionary::TermCorrection;
 /// closures, so nothing leaks once the window itself is gone).
 pub struct TermDictionaryController {
     pub window: TermDictionaryWindow,
-    rows: Rc<VecModel<TermRow>>,
 }
 
 /// Builds and shows the term dictionary editor window, seeded from
@@ -42,8 +41,9 @@ pub struct TermDictionaryController {
 ///   `term_dictionary::save`, then hides the window.
 /// - `cancel`: hides the window without touching disk, discarding whatever
 ///   in-memory edits were made since it was opened.
-pub fn open(corrections: Vec<TermCorrection>) -> TermDictionaryController {
+pub fn open(corrections: Vec<TermCorrection>, on_close: impl Fn() + 'static) -> TermDictionaryController {
     let window = TermDictionaryWindow::new().expect("failed to create term dictionary window");
+    let on_close: Rc<dyn Fn()> = Rc::new(on_close);
 
     let initial: Vec<TermRow> =
         corrections.into_iter().map(|c| TermRow { wrong: c.wrong.into(), correct: c.correct.into() }).collect();
@@ -88,6 +88,7 @@ pub fn open(corrections: Vec<TermCorrection>) -> TermDictionaryController {
     {
         let rows = rows.clone();
         let weak = window.as_weak();
+        let on_close = on_close.clone();
         window.on_save(move || {
             let corrections: Vec<TermCorrection> = rows
                 .iter()
@@ -97,18 +98,28 @@ pub fn open(corrections: Vec<TermCorrection>) -> TermDictionaryController {
             if let Some(win) = weak.upgrade() {
                 let _ = win.hide();
             }
+            on_close();
         });
     }
     {
         let weak = window.as_weak();
+        let on_close = on_close.clone();
         window.on_cancel(move || {
             if let Some(win) = weak.upgrade() {
                 let _ = win.hide();
             }
+            on_close();
+        });
+    }
+    {
+        let on_close = on_close.clone();
+        window.window().on_close_requested(move || {
+            on_close();
+            slint::CloseRequestResponse::HideWindow
         });
     }
 
     window.show().expect("failed to show term dictionary window");
 
-    TermDictionaryController { window, rows }
+    TermDictionaryController { window }
 }

@@ -37,15 +37,12 @@ pub fn load() -> Vec<TermCorrection> {
         .unwrap_or_default()
 }
 
-/// Atomically persists `list`: write to a sibling `.tmp` file, then rename
-/// over the real path, so a crash or concurrent read mid-write can never
-/// observe a half-written file -- identical pattern to `settings.rs::save`.
+/// Atomically persists `list` through the shared Windows replacement helper.
 pub fn save(list: &[TermCorrection]) {
     let path = terms_path();
     let Ok(json) = serde_json::to_string_pretty(list) else { return };
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+    if let Err(error) = crate::storage::atomic_write(&path, json.as_bytes()) {
+        eprintln!("warning: unable to save term dictionary: {error}");
     }
 }
 

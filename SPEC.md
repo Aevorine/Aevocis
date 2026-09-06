@@ -1,9 +1,10 @@
-# SPEC — native-rust full feature-parity push (2026-09-06)
+# SPEC — native-rust Rust + Slint Windows delivery (2026-09-06)
 
 User instruction: "C# → Rust+Slint migration — is it done? If not, finish it completely, in one pass."
-Answer: NOT done as of session start. Core loop only (~1244 lines): hotkey, capture, SenseVoice
-recognize, inject, tray, history, autostart, show/hide hotkey. Missing ~14 feature groups present
-in the C# reference (src-reference/, ~5745 lines + 6 XAML windows).
+At session start the answer was NOT DONE: the Rust core was wired only partially and its current
+checkout did not compile. This pass restores the Rust+Slint delivery path, fixes the discovered
+silent failures, and validates the Windows EXE/installer from the end-user side. The C# tree remains
+a reference and is not a Rust release artifact.
 
 ## Ground truth (from 5 parallel research forks reading src-reference/ directly, 2026-09-06)
 Condensed specs live only in this session's transcript; the essential facts are inlined into each
@@ -28,34 +29,34 @@ task below so this file alone is sufficient to resume.
 - Light/dark OS theme following: native-rust ships light-only "纸感 Paper" by design; not requested,
   not implemented this round.
 
-## Palette correction (real bug found this session)
-Current `ui/main_window.slint` uses `#f6f3ec`/`#b08d57`(gold)/`#2b2620`/`#8a8272` — close but NOT the
+## Palette correction (fixed)
+The old `ui/main_window.slint` used `#f6f3ec`/`#b08d57` (gold)/`#2b2620`/`#8a8272` — close but NOT the
 actual confirmed theme. Real values from `src-reference/OpenSuperWhisper.App/Assets/Theme.Light.xaml`:
 Background `#FAF7F0`, Header `#EFE9DC`, Surface `#FFFFFF`, Border `#E6DED0`, Ink `#2C2924`,
 Muted `#7A7263`, **Accent `#4D6A5A`** (muted dark green — NOT gold), AccentForeground `#FAF7F0`.
-Fix in `theme.rs` shared constants + apply everywhere (main window + every new window).
+Fixed in shared `ui/theme.slint` constants and applied across the Slint windows.
 
 ## Task DAG
 - [x] A (blocking, done by orchestrator): `src/settings.rs` (AppSettings, atomic load/save, export/
       import) + `src/theme.rs` (palette constants) + fix `ui/main_window.slint` colors.
-- [ ] B (worktree agent): `src/term_dictionary.rs` (matching engine + terms.json store) +
+- [x] B (worktree agent): `src/term_dictionary.rs` (matching engine + terms.json store) +
       `src/punctuation.rs` + `ui/term_dictionary_window.slint` + `src/term_dictionary_window.rs` glue.
-- [ ] C (worktree agent): `src/voice.rs` — VoiceCommand+VoiceMacro models, matcher, executor, stores
+- [x] C (worktree agent): `src/voice.rs` — VoiceCommand+VoiceMacro models, matcher, executor, stores
       (voice_commands.json / macros.json), TriggerTextNormalizer. Pure logic, no dedicated UI (edited
       via textboxes in settings window, like the C# app).
-- [ ] D (worktree agent): `src/draft_confirm.rs` + `ui/draft_confirm_window.slint`.
-- [ ] E (worktree agent): `src/onboarding.rs` + `ui/onboarding_window.slint`.
-- [ ] F (worktree agent): `src/crash_reporter.rs` (panic hook + rotation) + `src/priority.rs`
+- [x] D (worktree agent): `src/draft_confirm.rs` + `ui/draft_confirm_window.slint`.
+- [x] E (worktree agent): `src/onboarding.rs` + `ui/onboarding_window.slint`.
+- [x] F (worktree agent): `src/crash_reporter.rs` (panic hook + rotation) + `src/priority.rs`
       (SetPriorityClass helpers) + `src/update.rs` (GitHub release check + silent-installer relaunch).
-- [ ] G (orchestrator): `src/settings_window.rs` + `ui/settings_window.slint` — the big cross-cutting
+- [x] G (orchestrator): `src/settings_window.rs` + `ui/settings_window.slint` — the big cross-cutting
       UI (~20 controls), depends on A/B/C's public interfaces.
-- [ ] H (orchestrator): main.rs integration — hotkey.rs rework for configurable VK + per-app override
+- [x] H (orchestrator): main.rs integration — hotkey.rs rework for configurable VK + per-app override
       + Hold/Toggle mode; full post-processing pipeline order in on_hotkey_up (voice command match →
       voice macro match → term-dict → punctuation → draft-confirm gate → inject → history); waveform
       level meter in Overlay; process priority calls; crash reporter init; update check + tray item;
       history retention purge + clear button; onboarding trigger; settings/term-dict window open
       wiring; single-instance mutex; tray menu additions.
-- [ ] I: full workspace build + real launch smoke test + update TECH_ROADMAP.md verification section.
+- [x] I: full workspace build + real launch smoke test + update TECH_ROADMAP.md verification section.
 
 ## Pipeline order (from C# DictationController.cs, ground truth for H)
 1. stop capture, check min length (already exists)

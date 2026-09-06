@@ -11,7 +11,10 @@
 //! operation. `check_latest` therefore only ever returns `None` on any
 //! error path -- offline, rate-limited, malformed response, whatever.
 
-use std::io;
+use std::io::{self, Read};
+use std::time::Duration;
+
+use sha2::{Digest, Sha256};
 
 /// The list endpoint, NOT `/releases/latest` -- `Aevorine/Aevocis` hosts TWO
 /// independent release lines in one repo (the shipping C# app, tagged
@@ -34,6 +37,7 @@ pub struct UpdateInfo {
     pub version: String,
     pub download_url: String,
     pub html_url: String,
+    pub sha256: String,
 }
 
 /// Checks GitHub's releases for `Aevorine/Aevocis`, considering ONLY
@@ -44,7 +48,7 @@ pub struct UpdateInfo {
 /// fails for any reason (offline, rate-limited, malformed response).
 pub fn check_latest() -> Option<UpdateInfo> {
     let releases: Vec<serde_json::Value> =
-        ureq::get(REPO_RELEASES_URL).set("User-Agent", "Aevocis-UpdateChecker").call().ok()?.into_json().ok()?;
+        ureq::get(REPO_RELEASES_URL).set("User-Agent", "Aevocis-UpdateChecker").timeout(Duration::from_secs(15)).call().ok()?.into_json().ok()?;
 
     let mut best: Option<((u32, u32, u32), UpdateInfo)> = None;
     for release in &releases {
@@ -62,17 +66,19 @@ pub fn check_latest() -> Option<UpdateInfo> {
         }
         let html_url = release.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let Some(assets) = release.get("assets").and_then(|v| v.as_array()) else { continue };
-        let Some(download_url) = assets.iter().find_map(|asset| {
+        let Some((download_url, sha256)) = assets.iter().find_map(|asset| {
             let name = asset.get("name")?.as_str()?;
-            if name.ends_with(".exe") {
-                asset.get("browser_download_url")?.as_str().map(str::to_string)
+            if name.to_ascii_lowercase().ends_with(".exe") {
+                let url = asset.get("browser_download_url")?.as_str()?.to_string();
+                let digest = asset.get("digest")?.as_str()?.strip_prefix("sha256:")?.to_string();
+                if is_sha256(&digest) { Some((url, digest)) } else { None }
             } else {
                 None
             }
         }) else {
             continue;
         };
-        best = Some((parsed, UpdateInfo { version, download_url, html_url }));
+        best = Some((parsed, UpdateInfo { version, download_url, html_url, sha256 }));
     }
 
     let (parsed, info) = best?;
@@ -84,9 +90,11 @@ pub fn check_latest() -> Option<UpdateInfo> {
 /// the running app's own file lock on itself is released before the
 /// installer tries to overwrite the install directory.
 pub fn download_and_relaunch(info: &UpdateInfo) -> io::Result<()> {
-    let temp_path = std::env::temp_dir().join("Aevocis-Update-Setup.exe");
+    let temp_path = std::env::temp_dir().join(format!("Aevocis-Update-Setup-{}.exe", info.sha256));
 
     let response = ureq::get(&info.download_url)
+        .set("User-Agent", "Aevocis-Updater")
+        .timeout(Duration::from_secs(900))
         .call()
         .map_err(|e| io::Error::other(e.to_string()))?;
     let mut reader = response.into_reader();
@@ -96,6 +104,12 @@ pub fn download_and_relaunch(info: &UpdateInfo) -> io::Result<()> {
     // thing in RAM just to write it back out.
     std::io::copy(&mut reader, &mut file)?;
     drop(file);
+
+    let actual_sha256 = sha256_file(&temp_path)?;
+    if !actual_sha256.eq_ignore_ascii_case(&info.sha256) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "更新包 SHA-256 校验失败"));
+    }
 
     // Do not wait for the installer and do not clean up the temp file
     // ourselves: the installer will overwrite/replace this process's own
@@ -108,6 +122,24 @@ pub fn download_and_relaunch(info: &UpdateInfo) -> io::Result<()> {
         Ok(_) => std::process::exit(0),
         Err(e) => Err(e),
     }
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn sha256_file(path: &std::path::Path) -> io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 /// Finds the last run of `\d+\.\d+\.\d+` in `tag` via manual char scanning

@@ -19,9 +19,6 @@
 //! or macro, and what's left over".
 
 use serde::{Deserialize, Serialize};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY,
-};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{PCWSTR, w};
@@ -127,15 +124,12 @@ pub fn load_commands() -> Vec<VoiceCommand> {
         .unwrap_or_else(default_commands)
 }
 
-/// Atomically persists `list`: write to a sibling temp file, then rename
-/// over the real path, so a crash or concurrent read mid-write can never
-/// observe a half-written file -- same reasoning as `settings.rs::save`.
+/// Atomically persists `list` through the shared Windows replacement helper.
 pub fn save_commands(list: &[VoiceCommand]) {
     let path = commands_path();
     let Ok(json) = serde_json::to_string_pretty(list) else { return };
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+    if let Err(error) = crate::storage::atomic_write(&path, json.as_bytes()) {
+        eprintln!("warning: unable to save voice commands: {error}");
     }
 }
 
@@ -150,14 +144,12 @@ pub fn load_macros() -> Vec<VoiceMacro> {
         .unwrap_or_default()
 }
 
-/// Atomically persists `list` (same temp-file-then-rename pattern as
-/// `save_commands`).
+/// Atomically persists `list` through the shared Windows replacement helper.
 pub fn save_macros(list: &[VoiceMacro]) {
     let path = macros_path();
     let Ok(json) = serde_json::to_string_pretty(list) else { return };
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+    if let Err(error) = crate::storage::atomic_write(&path, json.as_bytes()) {
+        eprintln!("warning: unable to save voice macros: {error}");
     }
 }
 
@@ -341,19 +333,6 @@ fn parse_virtual_key(value: &str) -> Option<u16> {
     }
 }
 
-/// Builds one synthetic key event carrying a real virtual-key code -- unlike
-/// `inject.rs`'s `keyboard_input` (which carries a UTF-16 code unit under
-/// `KEYEVENTF_UNICODE`), this sends an actual key press (e.g. a real Enter
-/// key), so `wVk` is set and no `KEYEVENTF_UNICODE` flag is present.
-fn virtual_key_input(vk: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
-        },
-    }
-}
-
 /// Shell-executes `value` exactly as if the user had typed it into Run --
 /// works uniformly for an exe name on PATH, an absolute path, or a URL. This
 /// app never guesses install paths on the user's behalf.
@@ -373,13 +352,6 @@ fn launch_app(value: &str) -> Result<(), String> {
     if code > 32 { Ok(()) } else { Err(format!("打开「{value}」失败（错误码 {code}）")) }
 }
 
-/// Sends one key-down + key-up `INPUT` pair for virtual-key `vk`.
-fn send_virtual_key(vk: u16) -> Result<(), String> {
-    let inputs = [virtual_key_input(vk, KEYBD_EVENT_FLAGS(0)), virtual_key_input(vk, KEYEVENTF_KEYUP)];
-    let sent = unsafe { SendInput(&inputs, core::mem::size_of::<INPUT>() as i32) };
-    if sent as usize == inputs.len() { Ok(()) } else { Err("发送按键失败".to_string()) }
-}
-
 fn macro_action_label(t: MacroActionType) -> &'static str {
     match t {
         MacroActionType::LaunchApp => "打开",
@@ -393,8 +365,8 @@ fn macro_action_label(t: MacroActionType) -> &'static str {
 /// launch value, unknown key name, `SendInput`/injection rejection) is
 /// caught individually and recorded in the returned list, but never stops
 /// the remaining actions -- e.g. a macro "打开:一个装错的路径;打字:早上好"
-/// still types "早上好" even though the launch failed, instead of silently
-/// doing nothing at all. An empty return means every action succeeded.
+/// still attempts the remaining action, instead of silently doing nothing at
+/// all. Every key/text action rechecks the original foreground target.
 pub fn execute_macro(m: &VoiceMacro, target: &TargetToken) -> Vec<String> {
     let mut errors = Vec::new();
     for action in &m.actions {
@@ -408,7 +380,9 @@ pub fn execute_macro(m: &VoiceMacro, target: &TargetToken) -> Vec<String> {
                 }
             }
             MacroActionType::SendKey => match parse_virtual_key(&action.value) {
-                Some(vk) => send_virtual_key(vk),
+                Some(vk) => {
+                    if crate::inject::send_virtual_key(vk, target) { Ok(()) } else { Err("发送按键失败（目标窗口已切换或注入被拒绝）".to_string()) }
+                }
                 None => Err(format!("未知按键名：{}", action.value)),
             },
         };

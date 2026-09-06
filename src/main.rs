@@ -18,7 +18,6 @@
 //! C# reference app (`src-reference/`).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -39,7 +38,7 @@ use osw_native::recognizer::Recognizer;
 use osw_native::settings::{AppSettings, PushToTalkMode};
 use osw_native::show_hide_hotkey::ShowHideHotkey;
 use osw_native::target::{self, TargetToken};
-use osw_native::voice::{CommandMatch, VoiceCommand, VoiceCommandAction, VoiceMacro};
+use osw_native::voice::{CommandMatch, VoiceCommandAction};
 use osw_native::{
     app_info, audio, autostart, crash_reporter, history, hotkey, hotkey_capture, inject, priority, punctuation,
     settings, settings_window, term_dictionary, term_dictionary_window, update, voice,
@@ -111,9 +110,6 @@ struct AppState {
     history_model: Rc<slint::VecModel<HistoryEntry>>,
 
     settings: AppSettings,
-    term_corrections: Vec<term_dictionary::TermCorrection>,
-    voice_commands: Vec<VoiceCommand>,
-    voice_macros: Vec<VoiceMacro>,
 
     /// The raw VK that started the current session, latched at press-down so
     /// Hold-mode's key-up still matches even if the foreground app (and
@@ -132,12 +128,13 @@ struct AppState {
     /// window) is fine since these hold no state the rest of the app depends
     /// on once the user is done with them.
     settings_controller: Option<settings_window::Controller>,
-    term_dict_controller: Option<term_dictionary_window::Controller>,
+    term_dict_controller: Option<term_dictionary_window::TermDictionaryController>,
     onboarding_controller: Option<osw_native::onboarding::OnboardingController>,
 }
 
 thread_local! {
     static STATE: RefCell<Option<AppState>> = const { RefCell::new(None) };
+    static SHOW_HIDE_HOTKEY: RefCell<Option<ShowHideHotkey>> = const { RefCell::new(None) };
 }
 
 fn idle_color() -> slint::Color {
@@ -194,6 +191,20 @@ fn on_toggle_show_hide_hotkey() {
             && let Some(win) = state.main_win_weak.upgrade()
         {
             toggle_main_window(&win);
+        }
+    });
+}
+
+fn configure_show_hide_hotkey(settings: &AppSettings) {
+    let modifiers = HOT_KEY_MODIFIERS(settings.show_hide_hotkey_modifiers) | MOD_NOREPEAT;
+    let registered = ShowHideHotkey::register(modifiers, settings.show_hide_virtual_key, on_toggle_show_hide_hotkey);
+    SHOW_HIDE_HOTKEY.with(|slot| {
+        match registered {
+            Ok(hotkey) => {
+                *slot.borrow_mut() = Some(hotkey);
+                println!("Show/hide hotkey armed.");
+            }
+            Err(error) => eprintln!("warning: could not register the show/hide hotkey ({error}); use the tray icon instead."),
         }
     });
 }
@@ -441,7 +452,7 @@ fn append_history(text: &str) {
             let record = history::Record { time: history::now_hhmm(), text: text.to_string(), epoch_secs: history::now_epoch_secs() };
             state.history_model.insert(
                 0,
-                HistoryEntry { time: record.time.into(), text: record.text.into(), epoch_secs: history::now_epoch_secs() as f64 },
+                HistoryEntry { time: record.time.into(), text: record.text.into(), epoch_secs: record.epoch_secs.to_string().into() },
             );
             while state.history_model.row_count() > history::MAX_ENTRIES {
                 state.history_model.remove(state.history_model.row_count() - 1);
@@ -449,32 +460,26 @@ fn append_history(text: &str) {
             let snapshot: Vec<history::Record> = state
                 .history_model
                 .iter()
-                .map(|e| history::Record { time: e.time.to_string(), text: e.text.to_string(), epoch_secs: e.epoch_secs as i64 })
+                .map(|e| history::Record {
+                    time: e.time.to_string(),
+                    text: e.text.to_string(),
+                    epoch_secs: e.epoch_secs.parse::<i64>().unwrap_or(0),
+                })
                 .collect();
             history::save(&snapshot);
         }
     });
 }
 
-fn send_vk_press(vk: u16) -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY};
-    let make = |up: bool| INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: 0, dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() }, time: 0, dwExtraInfo: 0 },
-        },
-    };
-    let inputs = [make(false), make(true)];
-    let sent = unsafe { SendInput(&inputs, core::mem::size_of::<INPUT>() as i32) };
-    sent as usize == inputs.len()
-}
-
-fn send_backspaces(count: usize) {
+fn send_backspaces(count: usize, target: &TargetToken) -> bool {
     // Sane ceiling: a runaway count here (e.g. corrupted state) must not hang
     // the UI thread sending tens of thousands of synthetic keystrokes.
     for _ in 0..count.min(2000) {
-        send_vk_press(0x08);
+        if !inject::send_virtual_key(0x08, target) {
+            return false;
+        }
     }
+    true
 }
 
 /// Runs the shared term-dictionary + (optionally) punctuation pass, per the
@@ -512,18 +517,16 @@ fn handle_voice_command(
     match cmd.action {
         VoiceCommandAction::Cancel => {
             let last_len = STATE.with(|s| s.borrow().as_ref().map(|s| s.last_injected_length).unwrap_or(0));
-            if last_len > 0 {
-                send_backspaces(last_len);
-            }
+            let ok = last_len == 0 || send_backspaces(last_len, target);
             STATE.with(|s| {
                 if let Some(s) = s.borrow_mut().as_mut() {
                     s.last_injected_length = 0;
                 }
             });
-            finish_idle(ui, main_win_weak, "Cancelled last utterance.".to_string());
+            finish_idle(ui, main_win_weak, if ok { "Cancelled last utterance." } else { "Cancel blocked." }.to_string());
         }
         VoiceCommandAction::SendEnter => {
-            let ok = send_vk_press(0x0D);
+            let ok = inject::send_virtual_key(0x0D, target);
             if ok {
                 STATE.with(|s| {
                     if let Some(s) = s.borrow_mut().as_mut() {
@@ -545,7 +548,7 @@ fn handle_voice_command(
                 });
                 append_history(&upper);
             }
-            finish_idle(ui, main_win_weak, format!("Inserted: {upper}"));
+            finish_idle(ui, main_win_weak, if ok { format!("Inserted: {upper}") } else { format!("Input blocked: {upper}") });
         }
     }
 }
@@ -565,10 +568,18 @@ fn handle_recognition_result(text: String, captured_target: TargetToken, ui: Ove
         return;
     }
 
-    let (commands, macros, corrections, autocorrect, draft_gate) = STATE.with(|state| {
+    // Loaded fresh from disk (not cached in AppState) so an edit made through
+    // the Settings/Term-Dictionary windows takes effect on the very next
+    // dictation with no restart and no cache-invalidation plumbing needed --
+    // these are tiny JSON files, the read cost is negligible next to
+    // recognition latency.
+    let commands = voice::load_commands();
+    let macros = voice::load_macros();
+    let corrections = term_dictionary::load();
+    let (autocorrect, draft_gate) = STATE.with(|state| {
         let state = state.borrow();
         let s = state.as_ref().expect("STATE initialized before the event loop starts");
-        (s.voice_commands.clone(), s.voice_macros.clone(), s.term_corrections.clone(), s.settings.autocorrect_punctuation, s.settings.show_draft_before_inject)
+        (s.settings.autocorrect_punctuation, s.settings.show_draft_before_inject)
     });
 
     if let Some(cmd) = voice::match_command(&text, &commands) {
@@ -635,8 +646,8 @@ fn open_settings_window() {
         let params = settings_window::OpenParams {
             settings: app_state.settings.clone(),
             microphone_names: audio::list_input_device_names(),
-            voice_commands_text: voice::format_commands(&app_state.voice_commands),
-            voice_macros_text: voice::format_macros(&app_state.voice_macros),
+            voice_commands_text: voice::format_commands(&voice::load_commands()),
+            voice_macros_text: voice::format_macros(&voice::load_macros()),
         };
         let controller = settings_window::open(
             params,
@@ -646,8 +657,58 @@ fn open_settings_window() {
             || {
                 open_term_dictionary_window();
             },
+            |bundle: settings::SettingsBundle| {
+                apply_imported_settings(bundle);
+            },
+            || {
+                STATE.with(|state| {
+                    if let Some(state) = state.borrow_mut().as_mut() {
+                        state.settings_controller = None;
+                    }
+                });
+            },
         );
         app_state.settings_controller = Some(controller);
+    });
+}
+
+fn apply_imported_settings(bundle: settings::SettingsBundle) {
+    let settings::SettingsBundle { settings: imported_settings, terms, voice_commands, macros } = bundle;
+    let autostart_changed = STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let Some(state) = state.as_mut() else { return None };
+        let old_autostart = state.settings.auto_start_with_windows;
+        state.settings = imported_settings;
+        settings::save(&state.settings);
+        Some(state.settings.auto_start_with_windows != old_autostart)
+    });
+
+    if let Some(value) = terms
+        && let Ok(corrections) = serde_json::from_value::<Vec<term_dictionary::TermCorrection>>(value)
+    {
+        term_dictionary::save(&corrections);
+    }
+    if let Some(value) = voice_commands
+        && let Ok(commands) = serde_json::from_value::<Vec<voice::VoiceCommand>>(value)
+    {
+        voice::save_commands(&commands);
+    }
+    if let Some(value) = macros
+        && let Ok(macros) = serde_json::from_value::<Vec<voice::VoiceMacro>>(value)
+    {
+        voice::save_macros(&macros);
+    }
+
+    if autostart_changed == Some(true) {
+        let wanted = STATE.with(|state| state.borrow().as_ref().map(|state| state.settings.auto_start_with_windows).unwrap_or(false));
+        if let Err(error) = autostart::set_enabled(wanted) {
+            eprintln!("warning: could not update autostart registry entry: {error}");
+        }
+    }
+    STATE.with(|state| {
+        if let Some(state) = state.borrow().as_ref() {
+            configure_show_hide_hotkey(&state.settings);
+        }
     });
 }
 
@@ -659,25 +720,35 @@ fn apply_saved_settings(result: settings_window::SaveResult) {
         state.settings = result.settings;
         settings::save(&state.settings);
 
-        state.voice_commands = voice::parse_commands(&result.voice_commands_text);
-        voice::save_commands(&state.voice_commands);
-        state.voice_macros = voice::parse_macros(&result.voice_macros_text);
-        voice::save_macros(&state.voice_macros);
+        voice::save_commands(&voice::parse_commands(&result.voice_commands_text));
+        voice::save_macros(&voice::parse_macros(&result.voice_macros_text));
 
         state.history_model.set_vec(
             history::purge_older_than_days(
-                state.history_model.iter().map(|e| history::Record { time: e.time.to_string(), text: e.text.to_string(), epoch_secs: e.epoch_secs as i64 }).collect(),
+                state
+                    .history_model
+                    .iter()
+                    .map(|e| history::Record {
+                        time: e.time.to_string(),
+                        text: e.text.to_string(),
+                        epoch_secs: e.epoch_secs.parse::<i64>().unwrap_or(0),
+                    })
+                    .collect(),
                 state.settings.history_retention_days,
             )
             .into_iter()
-            .map(|r| HistoryEntry { time: r.time.into(), text: r.text.into(), epoch_secs: r.epoch_secs as f64 })
+            .map(|r| HistoryEntry { time: r.time.into(), text: r.text.into(), epoch_secs: r.epoch_secs.to_string().into() })
             .collect::<Vec<_>>(),
         );
         history::save(
             &state
                 .history_model
                 .iter()
-                .map(|e| history::Record { time: e.time.to_string(), text: e.text.to_string(), epoch_secs: e.epoch_secs as i64 })
+                .map(|e| history::Record {
+                    time: e.time.to_string(),
+                    text: e.text.to_string(),
+                    epoch_secs: e.epoch_secs.parse::<i64>().unwrap_or(0),
+                })
                 .collect::<Vec<_>>(),
         );
 
@@ -691,6 +762,11 @@ fn apply_saved_settings(result: settings_window::SaveResult) {
             eprintln!("warning: could not update autostart registry entry: {e}");
         }
     }
+    STATE.with(|state| {
+        if let Some(state) = state.borrow().as_ref() {
+            configure_show_hide_hotkey(&state.settings);
+        }
+    });
 }
 
 fn open_term_dictionary_window() {
@@ -701,12 +777,10 @@ fn open_term_dictionary_window() {
             let _ = controller.window.show();
             return;
         }
-        let corrections = app_state.term_corrections.clone();
-        let controller = term_dictionary_window::open(corrections, |saved: Vec<term_dictionary::TermCorrection>| {
-            term_dictionary::save(&saved);
+        let corrections = term_dictionary::load();
+        let controller = term_dictionary_window::open(corrections, || {
             STATE.with(|state| {
                 if let Some(state) = state.borrow_mut().as_mut() {
-                    state.term_corrections = saved;
                     state.term_dict_controller = None;
                 }
             });
@@ -716,6 +790,10 @@ fn open_term_dictionary_window() {
 }
 
 fn main() {
+    let Some(_single_instance) = osw_native::single_instance::acquire().expect("failed to acquire Aevocis instance lock") else {
+        osw_native::single_instance::show_existing();
+        return;
+    };
     crash_reporter::install();
     priority::lower();
 
@@ -732,10 +810,6 @@ fn main() {
     println!("SenseVoice recognizer ready.");
 
     let settings = settings::load();
-    let term_corrections = term_dictionary::load();
-    let voice_commands = voice::load_commands();
-    let voice_macros = voice::load_macros();
-
     let ui = Overlay::new().expect("failed to create overlay window");
     ui.set_status_text("Idle -- hold the push-to-talk key to dictate".into());
     ui.set_dot_color(idle_color());
@@ -744,9 +818,18 @@ fn main() {
     main_win.set_status_text(phase_label(Phase::Idle).into());
     let loaded_history: Vec<HistoryEntry> = history::purge_older_than_days(history::load(), settings.history_retention_days)
         .into_iter()
-        .map(|r| HistoryEntry { time: r.time.into(), text: r.text.into(), epoch_secs: r.epoch_secs as f64 })
+        .map(|r| HistoryEntry { time: r.time.into(), text: r.text.into(), epoch_secs: r.epoch_secs.to_string().into() })
         .collect();
-    history::save(&loaded_history.iter().map(|e| history::Record { time: e.time.to_string(), text: e.text.to_string(), epoch_secs: e.epoch_secs as i64 }).collect::<Vec<_>>());
+    history::save(
+        &loaded_history
+            .iter()
+            .map(|e| history::Record {
+                time: e.time.to_string(),
+                text: e.text.to_string(),
+                epoch_secs: e.epoch_secs.parse::<i64>().unwrap_or(0),
+            })
+            .collect::<Vec<_>>(),
+    );
     let history_model = Rc::new(slint::VecModel::from(loaded_history));
     main_win.set_history(history_model.clone().into());
     main_win.on_open_settings(open_settings_window);
@@ -783,9 +866,6 @@ fn main() {
             next_session: 0,
             history_model: history_model.clone(),
             settings,
-            term_corrections,
-            voice_commands,
-            voice_macros,
             active_matched_vk: None,
             toggle_active: false,
             last_toggle_at: Instant::now() - TOGGLE_DEBOUNCE,
@@ -799,21 +879,11 @@ fn main() {
     let hook: HHOOK = hotkey::install(on_raw_key_down, on_raw_key_up).expect("failed to install low-level keyboard hook");
     println!("Push-to-talk hotkey armed.");
 
-    let (show_hide_mods, show_hide_vk) = STATE.with(|s| {
-        let s = s.borrow();
-        let s = s.as_ref().unwrap();
-        (s.settings.show_hide_hotkey_modifiers, s.settings.show_hide_virtual_key)
+    STATE.with(|s| {
+        if let Some(state) = s.borrow().as_ref() {
+            configure_show_hide_hotkey(&state.settings);
+        }
     });
-    let _show_hide_hotkey = match ShowHideHotkey::register(HOT_KEY_MODIFIERS(show_hide_mods) | MOD_NOREPEAT, show_hide_vk, on_toggle_show_hide_hotkey) {
-        Ok(hotkey) => {
-            println!("Show/hide hotkey armed.");
-            Some(hotkey)
-        }
-        Err(e) => {
-            eprintln!("warning: could not register the show/hide hotkey ({e}); use the tray icon instead.");
-            None
-        }
-    };
 
     if !has_seen_onboarding {
         let ptt_vk = STATE.with(|s| s.borrow().as_ref().unwrap().settings.push_to_talk_virtual_key);
@@ -907,23 +977,29 @@ fn main() {
                     open_settings_window();
                 } else if event.id == check_update_menu_item_id {
                     if let Some(info) = pending_update.borrow_mut().take() {
-                        if let Err(e) = update::download_and_relaunch(&info) {
-                            eprintln!("warning: update download/relaunch failed: {e}");
-                        }
+                        std::thread::spawn(move || {
+                            if let Err(e) = update::download_and_relaunch(&info) {
+                                eprintln!("warning: update download/relaunch failed: {e}");
+                            }
+                        });
                     } else {
-                        // Manual re-check, matching the tray menu's other
-                        // "do it now" affordances.
-                        if let Some(info) = update::check_latest() {
-                            *pending_update.borrow_mut() = Some(info);
-                        }
+                        // Manual re-check must not hold up the Slint/tray
+                        // event loop while DNS, GitHub, or a proxy is slow.
+                        let result_slot = Arc::clone(&update_check_result);
+                        std::thread::spawn(move || {
+                            let result = update::check_latest();
+                            *result_slot.lock().unwrap() = Some(result);
+                        });
                     }
                 } else if let Some(item) = update_menu_item.borrow().as_ref()
                     && event.id == *item.id()
                 {
                     if let Some(info) = pending_update.borrow_mut().take() {
-                        if let Err(e) = update::download_and_relaunch(&info) {
-                            eprintln!("warning: update download/relaunch failed: {e}");
-                        }
+                        std::thread::spawn(move || {
+                            if let Err(e) = update::download_and_relaunch(&info) {
+                                eprintln!("warning: update download/relaunch failed: {e}");
+                            }
+                        });
                     }
                 } else if event.id == quit_menu_item_id {
                     slint::quit_event_loop().expect("failed to request event loop shutdown");

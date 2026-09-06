@@ -84,12 +84,16 @@ fn parse_app_hotkeys(text: &str) -> std::collections::HashMap<String, u32> {
 }
 
 /// Opens the Settings window populated from `params`. `on_save` fires once
-/// when the user clicks "保存" (the window is not closed automatically by
-/// this module for "取消" or the titlebar X either -- wire those in the
-/// caller if a different behavior than "just leave it open" is wanted, or
-/// extend this function; for this app's tray-app conventions, closing this
-/// secondary window outright on both paths is what callers should do).
-pub fn open(params: OpenParams, on_save: impl FnOnce(SaveResult) + 'static, on_open_term_dictionary: impl FnOnce() + 'static) -> Controller {
+/// when the user clicks "保存". `on_close` fires when the user cancels or
+/// closes the window from its title bar so the caller can discard the editing
+/// controller and reopen from fresh persisted state next time.
+pub fn open(
+    params: OpenParams,
+    on_save: impl FnOnce(SaveResult) + 'static,
+    on_open_term_dictionary: impl Fn() + 'static,
+    on_import: impl Fn(crate::settings::SettingsBundle) + 'static,
+    on_close: impl Fn() + 'static,
+) -> Controller {
     let win = SettingsWindow::new().expect("failed to create settings window");
 
     win.set_ptt_key_label(crate::hotkey_capture::vk_label(params.settings.push_to_talk_virtual_key).into());
@@ -156,13 +160,10 @@ pub fn open(params: OpenParams, on_save: impl FnOnce(SaveResult) + 'static, on_o
         });
     }
 
+    let on_open_term_dictionary: Rc<dyn Fn()> = Rc::new(on_open_term_dictionary);
     win.on_open_term_dictionary({
-        let cell = Rc::new(RefCell::new(Some(Box::new(on_open_term_dictionary) as Box<dyn FnOnce()>)));
-        move || {
-            if let Some(cb) = cell.borrow_mut().take() {
-                cb();
-            }
-        }
+        let on_open_term_dictionary = on_open_term_dictionary.clone();
+        move || on_open_term_dictionary()
     });
 
     win.on_export_settings({
@@ -174,20 +175,31 @@ pub fn open(params: OpenParams, on_save: impl FnOnce(SaveResult) + 'static, on_o
     });
     win.on_import_settings({
         let weak = win.as_weak();
+        let on_import: Rc<dyn Fn(crate::settings::SettingsBundle)> = Rc::new(on_import);
         move || {
             let Some(win) = weak.upgrade() else { return };
-            import_settings_dialog(&win);
+            import_settings_dialog(&win, on_import.as_ref());
         }
     });
 
+    let on_close: Rc<dyn Fn()> = Rc::new(on_close);
     win.on_cancel({
         let weak = win.as_weak();
+        let on_close = on_close.clone();
         move || {
             if let Some(win) = weak.upgrade() {
                 let _ = win.hide();
             }
+            on_close();
         }
     });
+    {
+        let on_close = on_close.clone();
+        win.window().on_close_requested(move || {
+            on_close();
+            slint::CloseRequestResponse::HideWindow
+        });
+    }
 
     let on_save_cell = Rc::new(RefCell::new(Some(Box::new(on_save) as Box<dyn FnOnce(SaveResult)>)));
     win.on_save({
@@ -232,14 +244,19 @@ fn export_settings_dialog(win: &SettingsWindow) {
     let default_path = dirs_desktop().join("Aevocis-settings-export.json");
     match crate::settings::export_bundle(
         &default_path,
-        &crate::settings::SettingsBundle { settings: crate::settings::load(), terms: None, voice_commands: None, macros: None },
+        &crate::settings::SettingsBundle {
+            settings: crate::settings::load(),
+            terms: serde_json::to_value(crate::term_dictionary::load()).ok(),
+            voice_commands: serde_json::to_value(crate::voice::load_commands()).ok(),
+            macros: serde_json::to_value(crate::voice::load_macros()).ok(),
+        },
     ) {
         Ok(()) => win.set_resource_usage_text(format!("已导出到 {}", default_path.display()).into()),
         Err(e) => win.set_resource_usage_text(format!("导出失败: {e}").into()),
     }
 }
 
-fn import_settings_dialog(win: &SettingsWindow) {
+fn import_settings_dialog(win: &SettingsWindow, on_import: &dyn Fn(crate::settings::SettingsBundle)) {
     let default_path = dirs_desktop().join("Aevocis-settings-export.json");
     match crate::settings::import_bundle(&default_path) {
         Ok(bundle) => {
@@ -249,6 +266,30 @@ fn import_settings_dialog(win: &SettingsWindow) {
             win.set_retention_selected_index(retention_days_to_index(bundle.settings.history_retention_days));
             win.set_ptt_key_label(crate::hotkey_capture::vk_label(bundle.settings.push_to_talk_virtual_key).into());
             win.set_ptt_key_vk(bundle.settings.push_to_talk_virtual_key as i32);
+            win.set_ptt_mode_toggle(matches!(bundle.settings.push_to_talk_mode, PushToTalkMode::Toggle));
+            win.set_show_hide_key_label(
+                crate::hotkey_capture::combo_label(bundle.settings.show_hide_hotkey_modifiers, bundle.settings.show_hide_virtual_key).into(),
+            );
+            win.set_show_hide_key_vk(bundle.settings.show_hide_virtual_key as i32);
+            win.set_show_hide_modifiers(bundle.settings.show_hide_hotkey_modifiers as i32);
+            let microphone_options = win.get_microphone_options();
+            let microphone_index = (1..microphone_options.row_count())
+                .find(|index| microphone_options.row_data(*index).is_some_and(|name| name == bundle.settings.microphone_device_id))
+                .map(|index| index as i32)
+                .unwrap_or(0);
+            win.set_microphone_selected_index(microphone_index);
+            win.set_app_hotkeys_text(format_app_hotkeys(&bundle.settings.app_specific_hotkeys).into());
+            if let Some(value) = bundle.voice_commands.as_ref()
+                && let Ok(commands) = serde_json::from_value::<Vec<crate::voice::VoiceCommand>>(value.clone())
+            {
+                win.set_voice_commands_text(crate::voice::format_commands(&commands).into());
+            }
+            if let Some(value) = bundle.macros.as_ref()
+                && let Ok(macros) = serde_json::from_value::<Vec<crate::voice::VoiceMacro>>(value.clone())
+            {
+                win.set_voice_macros_text(crate::voice::format_macros(&macros).into());
+            }
+            on_import(bundle);
             win.set_resource_usage_text(format!("已从 {} 导入", default_path.display()).into());
         }
         Err(e) => win.set_resource_usage_text(format!("导入失败（{}）: {e}", default_path.display()).into()),

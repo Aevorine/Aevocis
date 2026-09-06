@@ -45,7 +45,9 @@ pub fn load() -> Vec<Record> {
 pub fn save(records: &[Record]) {
     let trimmed = &records[..records.len().min(MAX_ENTRIES)];
     if let Ok(json) = serde_json::to_string_pretty(trimmed) {
-        let _ = std::fs::write(history_path(), json);
+        if let Err(error) = crate::storage::atomic_write(&history_path(), json.as_bytes()) {
+            eprintln!("warning: unable to save history: {error}");
+        }
     }
 }
 

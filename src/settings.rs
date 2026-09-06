@@ -96,17 +96,12 @@ pub fn load() -> AppSettings {
         .unwrap_or_default()
 }
 
-/// Atomically persists `settings`: write to a sibling temp file, then rename
-/// over the real path, so a crash or concurrent read mid-write can never
-/// observe a half-written file. `fs::rename` is atomic on the same NTFS
-/// volume, which `%LOCALAPPDATA%\Aevocis\*.tmp` always is relative to its own
-/// directory.
+/// Atomically persists `settings` with the shared Windows replacement helper.
 pub fn save(settings: &AppSettings) {
     let path = settings_path();
     let Ok(json) = serde_json::to_string_pretty(settings) else { return };
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+    if let Err(error) = crate::storage::atomic_write(&path, json.as_bytes()) {
+        eprintln!("warning: unable to save settings: {error}");
     }
 }
 
@@ -128,7 +123,7 @@ pub struct SettingsBundle {
 
 pub fn export_bundle(path: &Path, bundle: &SettingsBundle) -> io::Result<()> {
     let json = serde_json::to_string_pretty(bundle)?;
-    std::fs::write(path, json)
+    crate::storage::atomic_write(path, json.as_bytes())
 }
 
 /// Unlike `load()`, a user-initiated import surfaces its error directly

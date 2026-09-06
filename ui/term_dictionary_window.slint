@@ -36,40 +36,12 @@ export component TermDictionaryWindow inherits Window {
     callback save();
     callback cancel();
 
-    // Header bar, same shape as MainWindow's own header block.
-    Rectangle {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: 48px;
-        background: Theme.surface;
-
-        Text {
-            x: 16px;
-            y: 0px;
-            height: parent.height;
-            vertical-alignment: center;
-            text: "专业词典";
-            font-size: 16px;
-            font-weight: 600;
-            color: Theme.ink;
-        }
-
-        Rectangle {
-            x: 0px;
-            y: parent.height - 1px;
-            width: parent.width;
-            height: 1px;
-            background: Theme.border;
-        }
-    }
-
     // Two-column labels above the list. Widths mirror the per-row
     // HorizontalLayout below (two stretchy LineEdits + a fixed-width delete
     // column) so the labels roughly line up with their fields.
     Text {
         x: 16px;
-        y: 56px;
+        y: 8px;
         width: (parent.width - 32px - 28px - 16px) / 2;
         height: 18px;
         text: "错误词";
@@ -79,7 +51,7 @@ export component TermDictionaryWindow inherits Window {
 
     Text {
         x: 16px + (parent.width - 32px - 28px - 16px) / 2 + 8px;
-        y: 56px;
+        y: 8px;
         width: (parent.width - 32px - 28px - 16px) / 2;
         height: 18px;
         text: "正确词";
@@ -89,7 +61,7 @@ export component TermDictionaryWindow inherits Window {
 
     ListView {
         x: 8px;
-        y: 80px;
+        y: 32px;
         width: parent.width - 16px;
         height: 254px;
 
@@ -141,7 +113,7 @@ export component TermDictionaryWindow inherits Window {
 
     Button {
         x: 16px;
-        y: 344px;
+        y: 296px;
         width: parent.width - 32px;
         height: 36px;
         text: "添加一行";

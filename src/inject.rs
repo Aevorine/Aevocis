@@ -19,7 +19,7 @@
 //! focus change stops injection immediately rather than after the fact.
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY,
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY,
 };
 
 use crate::target::{self, TargetToken};
@@ -70,6 +70,27 @@ fn keyboard_input(scan: u16, flags: windows::Win32::UI::Input::KeyboardAndMouse:
                 time: 0,
                 dwExtraInfo: 0,
             },
+        },
+    }
+}
+
+/// Sends one real virtual-key press only while the original target window is
+/// still foreground. This is used for voice commands and macro key actions;
+/// Unicode text injection has the same target check at chunk boundaries.
+pub fn send_virtual_key(vk: u16, target: &TargetToken) -> bool {
+    if !target::matches_foreground(target) {
+        return false;
+    }
+    let inputs = [virtual_key_input(vk, KEYBD_EVENT_FLAGS(0)), virtual_key_input(vk, KEYEVENTF_KEYUP)];
+    let sent = unsafe { SendInput(&inputs, core::mem::size_of::<INPUT>() as i32) };
+    sent as usize == inputs.len()
+}
+
+fn virtual_key_input(vk: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
         },
     }
 }

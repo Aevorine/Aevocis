@@ -1,12 +1,12 @@
 [package]
 name = "osw_native"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 
 [dependencies]
 sherpa-onnx = "1.13.7"
 slint = { version = "1.17.1", features = ["raw-window-handle-06"] }
-windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_Media_Audio", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_UI_Shell", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_Debug", "Win32_System_Registry"] }
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_Media_Audio", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_UI_Shell", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_Debug", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_Security"] }
 cpal = "0.15"
 raw-window-handle = "0.6"
 tray-icon = { version = "0.24.2", default-features = false, features = ["common-controls-v6"] }
@@ -15,6 +15,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 winreg = "0.56.0"
 ureq = { version = "2", features = ["json"] }
+sha2 = "0.11.0"
 
 [build-dependencies]
 slint-build = "1.17.1"

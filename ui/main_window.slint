@@ -16,10 +16,9 @@ export struct HistoryEntry {
     text: string,
     // Unix seconds, carried through for retention-purge round-tripping (see
     // `src/history.rs::Record::epoch_secs`) -- not displayed by this UI.
-    // `float` rather than `int` so this survives past 2038 (Slint's `int` is
-    // 32-bit); every real-world epoch value is well within f64's exact-integer
-    // range regardless.
-    epoch-secs: float,
+    // It is a string because Slint's float is f32 and would silently lose
+    // precision for current Unix timestamps.
+    epoch-secs: string,
 }
 
 export component MainWindow inherits Window {

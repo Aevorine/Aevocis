@@ -11,7 +11,7 @@
 ; Compile with: iscc installer\Aevocis.iss   (run from native-rust\)
 
 #define MyAppName "Aevocis"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "Aevorine"
 #define MyAppExeName "Aevocis.exe"
 #define MyAppURL "https://github.com/Aevorine/Aevocis"
