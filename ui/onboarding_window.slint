@@ -1,0 +1,160 @@
+// One-time, 3-step first-run wizard, non-modal (does not block the main
+// window or the always-on-top Overlay -- see `src/main.rs`). Shown exactly
+// once per install via `src/onboarding.rs::show`, which also owns the three
+// steps' actual Chinese copy (title/body text) so this file stays pure
+// layout: `step-title`/`step-body`/`is-last-step`/`step` are all driven from
+// Rust rather than hardcoded here.
+//
+// Design reference (behavior, not code): the C# app's `OnboardingWindow`.
+
+import { Theme } from "theme.slint";
+
+export component OnboardingWindow inherits Window {
+    title: "欢迎使用 Aevocis";
+    width: 380px;
+    height: 260px;
+    background: Theme.background;
+
+    in property <string> hotkey-label: "右 Ctrl";
+    in property <int> step: 0;       // 0, 1, or 2 -- driven from Rust
+    in property <string> step-title;
+    in property <string> step-body;
+    in property <bool> is-last-step: false;
+    callback next();
+    callback back();
+    callback skip();
+
+    // Title, near the top.
+    Text {
+        x: 24px;
+        y: 28px;
+        width: parent.width - 48px;
+        height: 32px;
+        text: step-title;
+        font-size: 19px;
+        font-weight: 600;
+        color: Theme.ink;
+        horizontal-alignment: left;
+    }
+
+    // Body sentence, word-wrapped, below the title.
+    Text {
+        x: 24px;
+        y: 68px;
+        width: parent.width - 48px;
+        height: 72px;
+        text: step-body;
+        font-size: 14px;
+        color: Theme.muted;
+        wrap: word-wrap;
+        horizontal-alignment: left;
+    }
+
+    // Step indicator: a row of 3 small dots, centered, a bit below the body.
+    // The active step's dot uses Theme.accent, inactive ones use Theme.border.
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 164px;
+        width: 3 * 10px + 2 * 8px;
+        height: 8px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            for i in 3: Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: i == step ? Theme.accent : Theme.border;
+            }
+        }
+    }
+
+    // Footer separator.
+    Rectangle {
+        x: 0px;
+        y: parent.height - 64px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.border;
+    }
+
+    // Footer: "跳过" pinned to the left (always visible, always closes
+    // immediately), "上一步" (only when step > 0) and "下一步" /
+    // "知道了，开始用" pinned to the right.
+    Rectangle {
+        x: 0px;
+        y: parent.height - 63px;
+        width: parent.width;
+        height: 63px;
+
+        skip-btn := Text {
+            x: 24px;
+            y: 0px;
+            width: 60px;
+            height: parent.height;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+            text: "跳过";
+            font-size: 13px;
+            color: Theme.muted;
+
+            TouchArea {
+                clicked => { skip(); }
+            }
+        }
+
+        next-btn := Rectangle {
+            x: parent.width - self.width - 24px;
+            y: (parent.height - 34px) / 2;
+            width: is-last-step ? 132px : 88px;
+            height: 34px;
+            border-radius: 6px;
+            background: Theme.accent;
+
+            Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                text: is-last-step ? "知道了，开始用" : "下一步";
+                font-size: 13px;
+                color: Theme.accent-foreground;
+            }
+
+            TouchArea {
+                clicked => { next(); }
+            }
+        }
+
+        back-btn := Rectangle {
+            visible: step > 0;
+            x: next-btn.x - self.width - 12px;
+            y: (parent.height - 34px) / 2;
+            width: 76px;
+            height: 34px;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: Theme.surface;
+
+            Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                text: "上一步";
+                font-size: 13px;
+                color: Theme.ink;
+            }
+
+            TouchArea {
+                clicked => { back(); }
+            }
+        }
+    }
+}

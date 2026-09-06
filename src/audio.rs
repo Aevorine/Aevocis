@@ -51,12 +51,21 @@ impl AudioCapture {
         }
     }
 
-    /// Opens the default input device and starts streaming into the internal
-    /// buffer. Safe to call again after `stop()`.
-    pub fn start(&mut self) -> Result<(), String> {
+    /// Opens the input device named by `device_name` (matched against
+    /// `Device::name()`, exactly as returned by [`list_input_device_names`])
+    /// if given and found, otherwise falls back to the system default input
+    /// device -- so an empty string, a stale saved name (the device was
+    /// unplugged), or a name that no longer resolves all degrade gracefully
+    /// to "use whatever Windows currently considers default" rather than
+    /// failing the whole recording. Safe to call again after `stop()`.
+    pub fn start(&mut self, device_name: Option<&str>) -> Result<(), String> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
+        let device = device_name
+            .filter(|n| !n.is_empty())
+            .and_then(|wanted| {
+                host.input_devices().ok()?.find(|d| d.name().map(|n| n == wanted).unwrap_or(false))
+            })
+            .or_else(|| host.default_input_device())
             .ok_or_else(|| "no default audio input device".to_string())?;
         let supported = device
             .default_input_config()
@@ -134,6 +143,16 @@ impl AudioCapture {
         let mut buf = self.buffer.lock().unwrap();
         std::mem::take(&mut *buf)
     }
+}
+
+/// Lists available input device names for the Settings window's microphone
+/// picker. Returns an empty `Vec` (never an error) if enumeration fails --
+/// the picker just shows "system default" only in that case.
+pub fn list_input_device_names() -> Vec<String> {
+    let host = cpal::default_host();
+    host.input_devices()
+        .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
 }
 
 impl Default for AudioCapture {

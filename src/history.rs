@@ -18,6 +18,14 @@ pub const MAX_ENTRIES: usize = 300;
 pub struct Record {
     pub time: String,
     pub text: String,
+    /// Unix seconds at the moment this record was created. `#[serde(default)]`
+    /// so history files written before this field existed still load (they
+    /// deserialize to `0`). `purge_older_than_days` deliberately treats `0`
+    /// as "unknown age, never auto-delete" rather than "ancient, delete
+    /// first" -- when in doubt, retention purging must never destroy data it
+    /// cannot actually confirm is old.
+    #[serde(default)]
+    pub epoch_secs: i64,
 }
 
 fn history_path() -> std::path::PathBuf {
@@ -37,7 +45,9 @@ pub fn load() -> Vec<Record> {
 pub fn save(records: &[Record]) {
     let trimmed = &records[..records.len().min(MAX_ENTRIES)];
     if let Ok(json) = serde_json::to_string_pretty(trimmed) {
-        let _ = std::fs::write(history_path(), json);
+        if let Err(error) = crate::storage::atomic_write(&history_path(), json.as_bytes()) {
+            eprintln!("warning: unable to save history: {error}");
+        }
     }
 }
 
@@ -47,4 +57,21 @@ pub fn save(records: &[Record]) {
 pub fn now_hhmm() -> String {
     let st = unsafe { GetLocalTime() };
     format!("{:02}:{:02}", st.wHour, st.wMinute)
+}
+
+/// Current time as Unix seconds, for `Record::epoch_secs` (retention purging
+/// needs a real date, not just the `HH:MM` display string above).
+pub fn now_epoch_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// F23: drops entries older than `days` (by `epoch_secs`). `days == 0` means
+/// "keep forever" -- a no-op, returning `records` unchanged, matching
+/// `AppSettings::history_retention_days`'s documented default meaning.
+pub fn purge_older_than_days(records: Vec<Record>, days: u32) -> Vec<Record> {
+    if days == 0 {
+        return records;
+    }
+    let cutoff = now_epoch_secs() - (days as i64) * 86_400;
+    records.into_iter().filter(|r| r.epoch_secs == 0 || r.epoch_secs >= cutoff).collect()
 }

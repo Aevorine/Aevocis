@@ -4,8 +4,8 @@
 //!
 //! Usage: `cargo run --example recognize_wav -- <path-to-wav>`
 //! Model directory resolution is the same as the main binary's: set
-//! `OSW_SENSEVOICE_MODEL_DIR`, otherwise falls back to the dev-machine path in
-//! `osw_native::DEV_DEFAULT_MODEL_DIR`.
+//! `OSW_SENSEVOICE_MODEL_DIR`, otherwise use the packaged or checkout-relative
+//! SenseVoice model directory.
 
 use osw_native::recognizer::Recognizer;
 

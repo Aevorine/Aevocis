@@ -5,23 +5,35 @@
 //! these pieces are wired together, and `native/src/main.cpp` for the
 //! reference design this replicates in idiomatic Rust (not copied).
 
+pub mod app_info;
 pub mod audio;
 pub mod autostart;
+pub mod crash_reporter;
+pub mod draft_confirm;
 pub mod history;
 pub mod hotkey;
+pub mod hotkey_capture;
 pub mod inject;
+pub mod onboarding;
+pub mod priority;
+pub mod punctuation;
 pub mod recognizer;
+pub mod resource_usage;
+pub mod settings;
+pub mod settings_window;
 pub mod show_hide_hotkey;
+pub mod single_instance;
+pub mod storage;
 pub mod target;
+pub mod term_dictionary;
+pub mod term_dictionary_window;
+pub mod update;
+pub mod voice;
 
 use std::path::PathBuf;
 
-/// Dev-machine-only fallback location of the SenseVoice-small int8 weights,
-/// used only when neither an installed (exe-relative) copy nor an explicit
-/// override is found -- see `resolve_model_dir`. The ~237MB `.onnx` file is
-/// intentionally not vendored into this repo.
-pub const DEV_DEFAULT_MODEL_DIR: &str =
-    r"D:\Documents\WorkDocuments\Github\Fork\OpenSuperWhisper\src-reference\OpenSuperWhisper.App\Models\sensevoice";
+// Model weights are intentionally not vendored; installed builds use the
+// exe-relative `models/sensevoice` directory.
 
 /// Resolves the SenseVoice model directory, in priority order:
 /// 1. `OSW_SENSEVOICE_MODEL_DIR` env var (explicit override always wins).
@@ -30,8 +42,8 @@ pub const DEV_DEFAULT_MODEL_DIR: &str =
 ///    files there), resolved via `current_exe()` rather than the process's
 ///    current working directory so it works regardless of how the exe was
 ///    launched (double-click, Start Menu shortcut, `cmd.exe` from elsewhere).
-/// 3. The known absolute dev-machine path, purely so this exact checkout
-///    keeps working without extra setup while iterating.
+/// 3. Relative development candidates, so a checkout works without a
+///    machine-specific path leaking into the binary or repository.
 pub fn resolve_model_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("OSW_SENSEVOICE_MODEL_DIR") {
         return PathBuf::from(dir);
@@ -44,9 +56,16 @@ pub fn resolve_model_dir() -> PathBuf {
             return packaged;
         }
     }
-    let dev_default = PathBuf::from(DEV_DEFAULT_MODEL_DIR);
-    if dev_default.join("model.int8.onnx").is_file() {
-        return dev_default;
+    if let Ok(current_dir) = std::env::current_dir() {
+        for candidate in [
+            current_dir.join("models/sensevoice"),
+            current_dir.join("../src-reference/OpenSuperWhisper.App/Models/sensevoice"),
+            current_dir.join("../../src-reference/OpenSuperWhisper.App/Models/sensevoice"),
+        ] {
+            if candidate.join("model.int8.onnx").is_file() {
+                return candidate;
+            }
+        }
     }
     PathBuf::from("models/sensevoice")
 }
@@ -58,6 +77,8 @@ pub fn resolve_model_dir() -> PathBuf {
 pub fn app_data_dir() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
     let dir = PathBuf::from(base).join("Aevocis");
-    let _ = std::fs::create_dir_all(&dir);
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!("warning: unable to create app data directory {}: {error}", dir.display());
+    }
     dir
 }

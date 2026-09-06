@@ -43,6 +43,9 @@ pub fn capture(session: u64) -> Option<TargetToken> {
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 || !IsWindow(Some(hwnd)).as_bool() {
+            return None;
+        }
         Some(TargetToken {
             hwnd_raw: hwnd.0 as isize,
             pid,

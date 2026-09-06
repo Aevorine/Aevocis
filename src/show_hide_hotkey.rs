@@ -25,7 +25,7 @@
 use std::mem::size_of;
 use std::sync::OnceLock;
 
-use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, RegisterHotKey, UnregisterHotKey};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -69,7 +69,10 @@ impl ShowHideHotkey {
                 ..Default::default()
             };
             if RegisterClassExW(&wc) == 0 {
-                return Err(windows::core::Error::from_hresult(HRESULT::from_win32(GetLastError().0)));
+                let error = GetLastError();
+                if error != ERROR_CLASS_ALREADY_EXISTS {
+                    return Err(windows::core::Error::from_hresult(HRESULT::from_win32(error.0)));
+                }
             }
 
             // No WS_VISIBLE: this window is created purely as a message
@@ -90,7 +93,10 @@ impl ShowHideHotkey {
                 None,
             )?;
 
-            RegisterHotKey(Some(hwnd), HOTKEY_ID, modifiers, vk)?;
+            if let Err(error) = RegisterHotKey(Some(hwnd), HOTKEY_ID, modifiers, vk) {
+                let _ = DestroyWindow(hwnd);
+                return Err(error);
+            }
 
             Ok(Self { hwnd })
         }
