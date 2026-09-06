@@ -56,7 +56,11 @@ a full dialog — a real Open/Save dialog is a reasonable follow-up, not a corre
   hotkeys, exposed the `Aevocis` window, and remained responsive. A second launch exited while the
   first PID remained the only instance.
 - Dual-track verifier: silent failures 0; actual damage 0. Semgrep full tracked-source scan:
-  0 findings / 0 blocking. Gitleaks full history: 15 commits, 0 leaks.
+  0 findings / 0 blocking. Gitleaks full history: 16 commits, 0 leaks.
+- The exact 45-file candidate manifest was reviewed before egress. The generic Harness privacy
+  gate reports 10 literal matches for legitimate technical terms such as `TargetToken`,
+  `tokens.txt`, and the installer manifest's `publicKeyToken`; it found no credential-shaped
+  value. The result is retained as a gate false-positive, not relabeled as a PASS.
 - `ensure-project-harness` was incompatible with the nested hidden `.git` directory during marker
   detection; the local control plane was created manually and Harness Doctor now reports all four
   required documents PASS.
