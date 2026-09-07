@@ -78,9 +78,35 @@ struct UpdateAsset {
         const std::string_view name = json.substr(name_begin, name_end - name_begin);
         if (name.size() >= installer_suffix.size() &&
             name.compare(name.size() - installer_suffix.size(), installer_suffix.size(), installer_suffix) == 0) {
-            const std::size_t object_end = json.find('}', name_end);
+            const std::size_t object_begin = json.rfind('{', cursor);
+            if (object_begin == std::string_view::npos) return {};
+            int depth = 0;
+            bool in_string = false;
+            bool escaped = false;
+            std::size_t object_end = std::string_view::npos;
+            for (std::size_t index = object_begin; index < json.size(); ++index) {
+                const char character = json[index];
+                if (in_string) {
+                    if (escaped) {
+                        escaped = false;
+                    } else if (character == '\\') {
+                        escaped = true;
+                    } else if (character == '"') {
+                        in_string = false;
+                    }
+                    continue;
+                }
+                if (character == '"') {
+                    in_string = true;
+                } else if (character == '{') {
+                    ++depth;
+                } else if (character == '}' && --depth == 0) {
+                    object_end = index;
+                    break;
+                }
+            }
             if (object_end == std::string_view::npos) return {};
-            const std::string_view object = json.substr(cursor, object_end - cursor + 1);
+            const std::string_view object = json.substr(object_begin, object_end - object_begin + 1);
             return {json_string(object, "browser_download_url"), json_string(object, "digest")};
         }
         cursor = name_end + 1;
@@ -90,7 +116,7 @@ struct UpdateAsset {
 
 [[nodiscard]] HttpResponse https_get(std::wstring_view host, std::wstring_view path) noexcept {
     HttpResponse response;
-    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.2", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                     WINHTTP_NO_PROXY_BYPASS, 0);
     if (session == nullptr) {
         return response;
@@ -189,7 +215,7 @@ struct UpdateAsset {
         return false;
     }
     const std::wstring path = ascii_to_wide(url.substr(prefix.size()));
-    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.2", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                     WINHTTP_NO_PROXY_BYPASS, 0);
     if (session == nullptr) return false;
     (void)WinHttpSetTimeouts(session, 3000, 3000, 15000, 15000);

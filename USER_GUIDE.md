@@ -49,4 +49,4 @@ build\x64-release\aevocis_cli.exe --inject "需要输入的文本"
 
 ## 发布形态
 
-便携版是 `dist/Aevocis-portable` 目录，直接运行其中的 `aevocis.exe`；安装版是 `dist/Aevocis-0.2.1-Setup.exe`。模型、运行时 DLL、图标和 `aevocis_cli.exe` 已随安装包提供，文件摘要见 `dist/SHA256SUMS.txt`。安装程序会创建开始菜单、桌面和开机启动快捷方式；快捷方式与托盘使用同一份 Aevocis.ico。
+便携版是 `dist/Aevocis-portable` 目录，直接运行其中的 `aevocis.exe`；安装版是 `dist/Aevocis-0.2.2-Setup.exe`。模型、运行时 DLL、图标和 `aevocis_cli.exe` 已随安装包提供，文件摘要见 `dist/SHA256SUMS.txt`。安装程序会创建开始菜单、桌面和开机启动快捷方式；快捷方式与托盘使用同一份 Aevocis.ico。
