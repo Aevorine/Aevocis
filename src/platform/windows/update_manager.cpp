@@ -62,9 +62,35 @@ struct HttpResponse {
     return std::string(json.substr(value_begin, value_end - value_begin));
 }
 
+struct UpdateAsset {
+    std::string url;
+    std::string digest;
+};
+
+[[nodiscard]] UpdateAsset installer_asset(std::string_view json) {
+    constexpr std::string_view name_needle = "\"name\":\"";
+    constexpr std::string_view installer_suffix = "-Setup.exe";
+    std::size_t cursor = 0;
+    while ((cursor = json.find(name_needle, cursor)) != std::string_view::npos) {
+        const std::size_t name_begin = cursor + name_needle.size();
+        const std::size_t name_end = json.find('"', name_begin);
+        if (name_end == std::string_view::npos) return {};
+        const std::string_view name = json.substr(name_begin, name_end - name_begin);
+        if (name.size() >= installer_suffix.size() &&
+            name.compare(name.size() - installer_suffix.size(), installer_suffix.size(), installer_suffix) == 0) {
+            const std::size_t object_end = json.find('}', name_end);
+            if (object_end == std::string_view::npos) return {};
+            const std::string_view object = json.substr(cursor, object_end - cursor + 1);
+            return {json_string(object, "browser_download_url"), json_string(object, "digest")};
+        }
+        cursor = name_end + 1;
+    }
+    return {};
+}
+
 [[nodiscard]] HttpResponse https_get(std::wstring_view host, std::wstring_view path) noexcept {
     HttpResponse response;
-    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                     WINHTTP_NO_PROXY_BYPASS, 0);
     if (session == nullptr) {
         return response;
@@ -163,7 +189,7 @@ struct HttpResponse {
         return false;
     }
     const std::wstring path = ascii_to_wide(url.substr(prefix.size()));
-    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                     WINHTTP_NO_PROXY_BYPASS, 0);
     if (session == nullptr) return false;
     (void)WinHttpSetTimeouts(session, 3000, 3000, 15000, 15000);
@@ -251,14 +277,13 @@ void UpdateManager::check_and_install(HWND owner, const std::wstring& current_ve
         return;
     }
     const std::string tag = json_string(response.body, "tag_name");
-    const std::string asset_url = json_string(response.body, "browser_download_url");
-    const std::string digest = json_string(response.body, "digest");
+    const UpdateAsset asset = installer_asset(response.body);
     const std::string current = wide_to_ascii(current_version);
     if (tag.empty() || version_number(tag) <= version_number(current)) {
         MessageBoxW(owner, L"当前已是最新版本。", L"Aevocis", MB_OK | MB_ICONINFORMATION);
         return;
     }
-    if (asset_url.empty() || digest.rfind("sha256:", 0) != 0) {
+    if (asset.url.empty() || asset.digest.rfind("sha256:", 0) != 0) {
         MessageBoxW(owner, L"新版本缺少可验证的安装包。", L"Aevocis", MB_OK | MB_ICONWARNING);
         return;
     }
@@ -268,7 +293,7 @@ void UpdateManager::check_and_install(HWND owner, const std::wstring& current_ve
     std::error_code error;
     std::filesystem::create_directories(update_directory, error);
     const auto installer = update_directory / L"Aevocis-Setup.exe";
-    if (!download_asset(asset_url, installer) || sha256_file(installer) != digest.substr(7)) {
+    if (!download_asset(asset.url, installer) || sha256_file(installer) != asset.digest.substr(7)) {
         (void)DeleteFileW(installer.c_str());
         MessageBoxW(owner, L"安装包下载或校验失败。", L"Aevocis", MB_OK | MB_ICONERROR);
         return;

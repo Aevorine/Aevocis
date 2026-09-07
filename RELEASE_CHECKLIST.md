@@ -18,7 +18,7 @@
 ## 当前候选锁定信息
 
 - 版本：`0.1.0`，目标：Windows x64。
-- 便携版：`dist/Aevocis-portable`；安装包：`dist/Aevocis-0.1.0-Setup.exe`。
+- 便携版：`dist/Aevocis-portable`；安装包：`dist/Aevocis-0.2.1-Setup.exe`。
 - 哈希清单：`dist/SHA256SUMS.txt`，对应当前便携版 6 个文件。
 - 源码安全结果：Semgrep 0 findings、0 errors；源码目录 Gitleaks 无命中；双轨自检 0/0。
 - 发布目录安全结果：Gitleaks 2 个命中，均位于官方 SenseVoice 模型二进制；与官方归档成员 SHA-256 一致，但在独立审批前保持 BLOCK。
