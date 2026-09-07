@@ -6,11 +6,54 @@
 #include <optional>
 #include <thread>
 
+#include <windows.h>
+
 #ifdef AEVOCIS_HAS_SHERPA
 #include <sherpa-onnx/c-api/c-api.h>
 #endif
 
 namespace aevocis::platform::windows {
+
+namespace {
+
+// B2: the sherpa-onnx recognizer's thread count is fixed for the lifetime of the loaded
+// instance (reloading per-session to chase live CPU load would cost real startup latency on
+// every dictation, which would fight M01/M10's low-latency goals) -- so this scopes "adaptive"
+// to the one point where it's actually free: the choice made at model-load time. Two 100ms
+// samples of system-wide CPU idle time bracket the same window GetSystemTimes measures over;
+// a system already busy with other work gets fewer recognition threads so it doesn't compete
+// for CPU with whatever the user is already running.
+[[nodiscard]] unsigned int load_aware_thread_cap(unsigned int hardware_threads) noexcept {
+    const unsigned int baseline = std::clamp(hardware_threads == 0 ? 2U : hardware_threads / 2U, 1U, 4U);
+    FILETIME idle_before{}, kernel_before{}, user_before{};
+    if (GetSystemTimes(&idle_before, &kernel_before, &user_before) == FALSE) {
+        return baseline;
+    }
+    Sleep(100);
+    FILETIME idle_after{}, kernel_after{}, user_after{};
+    if (GetSystemTimes(&idle_after, &kernel_after, &user_after) == FALSE) {
+        return baseline;
+    }
+    const auto to_uint64 = [](const FILETIME& value) {
+        return (static_cast<std::uint64_t>(value.dwHighDateTime) << 32) | value.dwLowDateTime;
+    };
+    const std::uint64_t idle_delta = to_uint64(idle_after) - to_uint64(idle_before);
+    const std::uint64_t kernel_delta = to_uint64(kernel_after) - to_uint64(kernel_before);
+    const std::uint64_t user_delta = to_uint64(user_after) - to_uint64(user_before);
+    const std::uint64_t total_delta = kernel_delta + user_delta;
+    if (total_delta == 0) {
+        return baseline;
+    }
+    const double idle_fraction = static_cast<double>(idle_delta) / static_cast<double>(total_delta);
+    // Below ~35% system-wide idle, the machine is already busy with other work -- halve the
+    // thread request (never below 1) rather than pile on and slow everything down further.
+    if (idle_fraction < 0.35) {
+        return std::max(1U, baseline / 2U);
+    }
+    return baseline;
+}
+
+}  // namespace
 
 struct SenseVoiceRecognizer::Impl {
     mutable std::mutex mutex;
@@ -52,8 +95,7 @@ bool SenseVoiceRecognizer::load(const std::string& model_directory) noexcept {
         config.model_config.sense_voice.language = "auto";
         config.model_config.sense_voice.use_itn = 1;
         config.model_config.tokens = tokens_path.c_str();
-        const auto available = std::thread::hardware_concurrency();
-        config.model_config.num_threads = static_cast<int32_t>(std::clamp(available == 0 ? 2U : available / 2U, 1U, 4U));
+        config.model_config.num_threads = static_cast<int32_t>(load_aware_thread_cap(std::thread::hardware_concurrency()));
         config.model_config.provider = "cpu";
         config.decoding_method = "greedy_search";
         const SherpaOnnxOfflineRecognizer* recognizer = SherpaOnnxCreateOfflineRecognizer(&config);
@@ -89,6 +131,20 @@ bool SenseVoiceRecognizer::load(const std::string& model_directory) noexcept {
         return true;
     } catch (...) {
         return false;
+    }
+#endif
+}
+
+void SenseVoiceRecognizer::unload() noexcept {
+#ifdef AEVOCIS_HAS_SHERPA
+    std::scoped_lock lock(impl_->mutex);
+    if (impl_->punctuation != nullptr) {
+        SherpaOnnxDestroyOfflinePunctuation(impl_->punctuation);
+        impl_->punctuation = nullptr;
+    }
+    if (impl_->recognizer != nullptr) {
+        SherpaOnnxDestroyOfflineRecognizer(impl_->recognizer);
+        impl_->recognizer = nullptr;
     }
 #endif
 }

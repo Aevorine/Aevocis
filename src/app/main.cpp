@@ -52,6 +52,13 @@ using platform::windows::WasapiRecorder;
 
 constexpr int kShowHideHotkeyId = 1;
 constexpr int kUndoHotkeyId = 2;
+// B3: idle-unload watchdog. Checked every minute; the model is released after 10 consecutive
+// idle minutes, trading a one-time reload latency on the next dictation for not holding the
+// model's working set in memory during long idle stretches -- the counterpart the app's
+// existing "load lazily, never at startup" choice was missing.
+constexpr UINT_PTR kIdleTimerId = 1;
+constexpr UINT kIdleTimerIntervalMs = 60'000;
+constexpr ULONGLONG kIdleUnloadThresholdMs = 10ULL * 60ULL * 1000ULL;
 
 [[nodiscard]] std::string uppercase_utf8(std::string_view value) {
     if (value.empty()) {
@@ -138,6 +145,8 @@ public:
         // rebind UI); registration failure (e.g. another app already owns it) degrades to
         // "voice undo still works", never a crash.
         (void)undo_hotkey_.register_hotkey(window_.handle(), kUndoHotkeyId, MOD_CONTROL | MOD_ALT, 'Z');
+        last_activity_tick_ = GetTickCount64();
+        (void)SetTimer(window_.handle(), kIdleTimerId, kIdleTimerIntervalMs, nullptr);
         (void)keyboard_hook_.install(window_.handle(), platform::windows::kKeyboardMessage);
         window_.show();
         MSG message{};
@@ -157,6 +166,13 @@ private:
         }
         if (message == WM_HOTKEY && static_cast<int>(wparam) == kUndoHotkeyId) {
             request_undo();
+            return true;
+        }
+        if (message == WM_TIMER && wparam == kIdleTimerId) {
+            if (!scheduler_.active() && recognizer_.ready() &&
+                GetTickCount64() - last_activity_tick_ >= kIdleUnloadThresholdMs) {
+                recognizer_.unload();
+            }
             return true;
         }
         if (message == platform::windows::kKeyboardMessage) {
@@ -290,6 +306,7 @@ private:
     }
 
     void run_session(std::stop_token stop, core::SessionId id, TargetWindowToken target) {
+        last_activity_tick_ = GetTickCount64();
         post_state(core::AppState::Starting);
         if (!recorder_.start()) {
             (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::AudioUnavailable);
@@ -613,6 +630,10 @@ private:
     TrayIcon tray_;
     GlobalHotkey show_hide_hotkey_;
     GlobalHotkey undo_hotkey_;
+    // Written from both the UI thread (run()/handle_message) and scheduler worker threads
+    // (run_session) -- atomic rather than a plain ULONGLONG to avoid a real data race, not just
+    // a theoretical one, since x64's natural word-tearing-free store isn't a language guarantee.
+    std::atomic<ULONGLONG> last_activity_tick_{0};
     KeyboardHook keyboard_hook_;
     core::SingleTaskScheduler scheduler_;
     WasapiRecorder recorder_;
