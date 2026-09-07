@@ -47,6 +47,10 @@ public:
     void set_trigger_mode_handler(Action handler);
     void set_history_clear_handler(Action handler);
     void set_theme_handler(Action handler);
+    // B5: fires exactly once, on the first real WM_PAINT after create() -- lets the App layer
+    // (which owns logging/storage per the documented module boundaries; UI itself does not)
+    // measure and record real first-frame latency instead of leaving M01 an unmeasured "待测".
+    void set_first_paint_handler(Action handler);
     void set_theme(ThemeMode theme) noexcept;
     void set_trigger_mode(bool toggle) noexcept;
     void show_or_hide() noexcept;
@@ -93,6 +97,8 @@ private:
     Action trigger_mode_handler_;
     Action history_clear_handler_;
     Action theme_handler_;
+    Action first_paint_handler_;
+    bool first_paint_fired_{false};
     std::vector<std::wstring> history_;
     SessionStats stats_{};
     int focus_index_{-1};

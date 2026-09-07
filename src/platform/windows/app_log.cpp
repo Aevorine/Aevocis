@@ -57,4 +57,10 @@ void AppLog::record_error(core::AppState state, core::ErrorCode error) noexcept 
     append_line(line.str());
 }
 
+void AppLog::record_metric(std::string_view name, std::uint64_t value) noexcept {
+    std::ostringstream line;
+    line << timestamp() << " metric=" << name << " value=" << value;
+    append_line(line.str());
+}
+
 }  // namespace aevocis::platform::windows

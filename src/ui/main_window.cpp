@@ -141,6 +141,8 @@ void MainWindow::set_history_clear_handler(Action handler) { history_clear_handl
 
 void MainWindow::set_theme_handler(Action handler) { theme_handler_ = std::move(handler); }
 
+void MainWindow::set_first_paint_handler(Action handler) { first_paint_handler_ = std::move(handler); }
+
 void MainWindow::set_theme(ThemeMode theme) noexcept {
     theme_ = theme;
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -247,6 +249,12 @@ LRESULT MainWindow::handle_window_message(UINT message, WPARAM wparam, LPARAM lp
         BeginPaint(hwnd_, &paint);
         render();
         EndPaint(hwnd_, &paint);
+        if (!first_paint_fired_) {
+            first_paint_fired_ = true;
+            if (first_paint_handler_) {
+                first_paint_handler_();
+            }
+        }
         return 0;
     }
     case WM_SIZE:

@@ -94,9 +94,9 @@ constexpr ULONGLONG kIdleUnloadThresholdMs = 10ULL * 60ULL * 1000ULL;
 
 class Application {
 public:
-    explicit Application(HINSTANCE instance)
+    explicit Application(HINSTANCE instance, ULONGLONG process_start_tick)
         : instance_(instance), instance_guard_(L"Local\\AevocisNativeCppSingleton"), settings_(), window_(instance), overlay_(instance),
-          command_palette_(instance) {
+          command_palette_(instance), process_start_tick_(process_start_tick) {
         settings_ = settings_store_.load();
         toggle_mode_.store(settings_.toggle_mode);
         history_store_.load();
@@ -117,6 +117,13 @@ public:
         }
         window_.set_message_handler([this](UINT message, WPARAM wparam, LPARAM lparam) {
             return handle_message(message, wparam, lparam);
+        });
+        // B5: M01's real, not-fabricated, first-frame measurement -- logged once via AppLog
+        // (stage/number only, no user content, consistent with E5's redaction rule) rather than
+        // just asserted against APP_METRICS.md's "<300ms" target with no evidence behind it.
+        window_.set_first_paint_handler([this] {
+            const ULONGLONG elapsed_ms = GetTickCount64() - process_start_tick_;
+            platform::windows::AppLog::record_metric("first_paint_ms", elapsed_ms);
         });
         window_.set_theme_handler([this] {
             settings_.theme = settings_.theme == 0 ? 1 : 0;
@@ -697,6 +704,7 @@ private:
     // (run_session) -- atomic rather than a plain ULONGLONG to avoid a real data race, not just
     // a theoretical one, since x64's natural word-tearing-free store isn't a language guarantee.
     std::atomic<ULONGLONG> last_activity_tick_{0};
+    ULONGLONG process_start_tick_{0};
     KeyboardHook keyboard_hook_;
     core::SingleTaskScheduler scheduler_;
     WasapiRecorder recorder_;
@@ -780,11 +788,12 @@ int run_command_line(PWSTR command_line) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int) {
+    const ULONGLONG process_start_tick = GetTickCount64();
     const int command_result = run_command_line(command_line);
     if (command_result >= 0) return command_result;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     aevocis::platform::windows::CrashReporter::install();
     aevocis::platform::windows::CrashReporter::register_auto_restart();
-    Application application(instance);
+    Application application(instance, process_start_tick);
     return application.run();
 }
