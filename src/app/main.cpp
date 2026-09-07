@@ -1,5 +1,6 @@
 #include "aevocis/core/audio_gate.hpp"
 #include "aevocis/core/chunked_recognition.hpp"
+#include "aevocis/core/noise_gate.hpp"
 #include "aevocis/core/recognizer.hpp"
 #include "aevocis/core/task_scheduler.hpp"
 #include "aevocis/core/text_pipeline.hpp"
@@ -321,11 +322,16 @@ private:
                 return stop.stop_requested() || (toggle_mode_.load() ? toggle_stop_ : !key_down_);
             });
         }
-        const platform::windows::RecordedAudio audio = recorder_.stop();
+        platform::windows::RecordedAudio audio = recorder_.stop();
         if (stop.stop_requested()) {
             (void)scheduler_.transition(id, core::AppState::Cancelled, core::ErrorCode::Cancelled);
             post_state(core::AppState::Cancelled);
             return;
+        }
+        // A4: high-pass + adaptive noise-floor gate runs before anything else sees the buffer,
+        // so both the A2 silence check and the recognizer itself get the cleaned signal.
+        if (audio.sample_rate != 0) {
+            core::NoiseGate(audio.sample_rate).process(audio.samples);
         }
         // A2: silence/too-short gate -- runs before the recognizer ever sees the buffer, so a
         // mistrigger or near-silent capture can never produce hallucinated model output. This is

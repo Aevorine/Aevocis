@@ -53,6 +53,23 @@ namespace {
     return baseline;
 }
 
+// B4: detects a DirectML-capable onnxruntime next to the executable rather than assuming one is
+// bundled. The prebuilt sherpa-onnx package currently vendored in this repo
+// (v1.13.7-win-x64-shared-MT-Release, see native-cpp/.cache) is the CPU-only variant --
+// activating GPU acceleration for real needs deliberately fetching, hash-verifying, and
+// vendoring the "-directml" release variant, which this pass does not do blind under context
+// pressure. This function only makes that swap safe and automatic *if* someone (a later pass,
+// or a user's own drop-in) places a DirectML.dll next to aevocis.exe; with the currently-shipped
+// CPU-only runtime this always returns false and behavior is unchanged.
+[[nodiscard]] bool directml_available() noexcept {
+    wchar_t executable[MAX_PATH]{};
+    if (GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable)) == 0) {
+        return false;
+    }
+    const auto directml_path = std::filesystem::path(executable).parent_path() / L"DirectML.dll";
+    return std::filesystem::exists(directml_path);
+}
+
 }  // namespace
 
 struct SenseVoiceRecognizer::Impl {
@@ -96,9 +113,17 @@ bool SenseVoiceRecognizer::load(const std::string& model_directory) noexcept {
         config.model_config.sense_voice.use_itn = 1;
         config.model_config.tokens = tokens_path.c_str();
         config.model_config.num_threads = static_cast<int32_t>(load_aware_thread_cap(std::thread::hardware_concurrency()));
-        config.model_config.provider = "cpu";
+        const bool use_directml = directml_available();
+        config.model_config.provider = use_directml ? "directml" : "cpu";
         config.decoding_method = "greedy_search";
         const SherpaOnnxOfflineRecognizer* recognizer = SherpaOnnxCreateOfflineRecognizer(&config);
+        if (recognizer == nullptr && use_directml) {
+            // The bundled onnxruntime.dll may not actually be the DirectML-enabled build even
+            // though DirectML.dll is present (mismatched drop-in) -- fall back to cpu rather
+            // than leaving recognition unavailable over a GPU path that didn't pan out.
+            config.model_config.provider = "cpu";
+            recognizer = SherpaOnnxCreateOfflineRecognizer(&config);
+        }
         if (recognizer == nullptr) {
             return false;
         }

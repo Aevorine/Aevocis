@@ -17,6 +17,7 @@ endif()
 add_library(aevocis_core STATIC
     src/core/audio_gate.cpp
     src/core/chunked_recognition.cpp
+    src/core/noise_gate.cpp
     src/core/recognizer.cpp
     src/core/task_scheduler.cpp
     src/core/text_pipeline.cpp
