@@ -59,8 +59,24 @@ void RecordingOverlay::set_state(core::AppState state) noexcept {
         hide();
         return;
     }
-    RECT work{};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    // D3: position on whichever monitor the cursor is currently on, matched to that monitor's
+    // own work area, instead of always the primary display's work area -- so the overlay shows
+    // up where the user is actually looking on a multi-monitor setup. Window pixel size is
+    // intentionally left unscaled by DPI here: the render target is recreated at the real client
+    // size on WM_SIZE, but render()'s draw calls still target the fixed kWidth/kHeight logical
+    // box, so scaling the window itself without also reworking those draw rects would leave
+    // visible dead space at non-100% scale -- a follow-up, not bundled into this fix.
+    POINT cursor{};
+    HMONITOR monitor = GetCursorPos(&cursor) != FALSE ? MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY)
+                                                       : MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    RECT work{0, 0, 0, 0};
+    if (monitor != nullptr && GetMonitorInfoW(monitor, &info) != FALSE) {
+        work = info.rcWork;
+    } else {
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    }
     const int x = (work.left + work.right - kWidth) / 2;
     const int y = work.bottom - kHeight - 34;
     SetWindowPos(hwnd_, HWND_TOPMOST, x, y, kWidth, kHeight, SWP_NOACTIVATE | SWP_SHOWWINDOW);

@@ -7,6 +7,7 @@
 #include "aevocis/platform/windows/app_log.hpp"
 #include "aevocis/platform/windows/global_hotkey.hpp"
 #include "aevocis/platform/windows/crash_reporter.hpp"
+#include "aevocis/platform/windows/history_export.hpp"
 #include "aevocis/platform/windows/command_pipe.hpp"
 #include "aevocis/platform/windows/autostart.hpp"
 #include "aevocis/platform/windows/keyboard_hook.hpp"
@@ -50,6 +51,7 @@ using platform::windows::TrayIcon;
 using platform::windows::WasapiRecorder;
 
 constexpr int kShowHideHotkeyId = 1;
+constexpr int kUndoHotkeyId = 2;
 
 [[nodiscard]] std::string uppercase_utf8(std::string_view value) {
     if (value.empty()) {
@@ -131,6 +133,11 @@ public:
         (void)command_server_.start([this](std::string command) { return handle_command_request(std::move(command)); });
         (void)show_hide_hotkey_.register_hotkey(window_.handle(), kShowHideHotkeyId, settings_.show_hide_modifiers,
                                                  settings_.show_hide_virtual_key);
+        // C4: dedicated undo-last-injection hotkey, separate from the voice "撤销" command so
+        // it works instantly without speaking. Fixed combo for now (not yet in the settings
+        // rebind UI); registration failure (e.g. another app already owns it) degrades to
+        // "voice undo still works", never a crash.
+        (void)undo_hotkey_.register_hotkey(window_.handle(), kUndoHotkeyId, MOD_CONTROL | MOD_ALT, 'Z');
         (void)keyboard_hook_.install(window_.handle(), platform::windows::kKeyboardMessage);
         window_.show();
         MSG message{};
@@ -146,6 +153,10 @@ private:
     bool handle_message(UINT message, WPARAM wparam, LPARAM lparam) {
         if (message == WM_HOTKEY && static_cast<int>(wparam) == kShowHideHotkeyId) {
             window_.show_or_hide();
+            return true;
+        }
+        if (message == WM_HOTKEY && static_cast<int>(wparam) == kUndoHotkeyId) {
+            request_undo();
             return true;
         }
         if (message == platform::windows::kKeyboardMessage) {
@@ -437,6 +448,39 @@ private:
         (void)PostMessageW(window_.handle(), platform::windows::kHistoryMessage, 0, 0);
     }
 
+    // C4: same VK_BACK-loop undo the voice "撤销" command already used, reachable directly by
+    // hotkey. Declines (silently, matching schedule_injection's existing busy behavior) while a
+    // session is active, since undoing mid-recognition would race the in-flight injection.
+    void request_undo() {
+        if (scheduler_.active()) {
+            return;
+        }
+        TargetWindowToken previous_target;
+        std::size_t previous_length = 0;
+        {
+            std::scoped_lock lock(last_injection_mutex_);
+            previous_target = last_injection_target_;
+            previous_length = last_injected_length_;
+            last_injected_length_ = 0;
+        }
+        if (previous_length == 0 || !previous_target.valid()) {
+            return;
+        }
+        if (!scheduler_.submit(previous_target.core_token(), [this, previous_target, previous_length](std::stop_token, core::SessionId id) {
+                const bool undone = previous_target.still_valid() && injector_.send_virtual_key(previous_target, VK_BACK, previous_length);
+                (void)scheduler_.transition(id, undone ? core::AppState::Idle : core::AppState::Failed,
+                                            undone ? core::ErrorCode::None : core::ErrorCode::InjectionFailed);
+                if (undone) {
+                    post_state(core::AppState::Idle);
+                } else {
+                    post_error(core::ErrorCode::InjectionFailed);
+                }
+            })) {
+            std::scoped_lock lock(last_injection_mutex_);
+            last_injected_length_ = previous_length;
+        }
+    }
+
     void schedule_injection(std::string text) {
         if (text.empty() || scheduler_.active()) {
             return;
@@ -464,6 +508,28 @@ private:
     [[nodiscard]] std::string handle_command_request(std::string command) {
         if (command == "status") {
             return "{\"running\":true}\n";
+        }
+        // F3: "export:<format>:<absolute-path>" -- handled synchronously here (a pure read of
+        // history plus a file write, no UI/injection involved) rather than routed through the
+        // UI-thread command queue like inject/show/theme are.
+        if (command.rfind("export:", 0) == 0) {
+            const std::string_view payload(command);
+            const auto first_colon = payload.find(':', 7);
+            if (first_colon == std::string_view::npos) {
+                return "{\"accepted\":false,\"error\":\"malformed_export\"}\n";
+            }
+            const auto format = platform::windows::HistoryExporter::parse_format(payload.substr(7, first_colon - 7));
+            if (!format.has_value()) {
+                return "{\"accepted\":false,\"error\":\"unknown_format\"}\n";
+            }
+            const std::filesystem::path target(command.substr(first_colon + 1));
+            std::vector<platform::windows::HistoryRecord> snapshot;
+            {
+                std::scoped_lock lock(history_mutex_);
+                snapshot = history_store_.records();
+            }
+            const bool wrote = platform::windows::HistoryExporter::export_to(*format, target, snapshot);
+            return wrote ? "{\"accepted\":true}\n" : "{\"accepted\":false,\"error\":\"write_failed\"}\n";
         }
         if (command != "show" && command != "theme" && command.rfind("inject:", 0) != 0) {
             return "{\"accepted\":false,\"error\":\"unknown_command\"}\n";
@@ -546,6 +612,7 @@ private:
     ui::RecordingOverlay overlay_;
     TrayIcon tray_;
     GlobalHotkey show_hide_hotkey_;
+    GlobalHotkey undo_hotkey_;
     KeyboardHook keyboard_hook_;
     core::SingleTaskScheduler scheduler_;
     WasapiRecorder recorder_;
@@ -598,6 +665,8 @@ int run_command_line(PWSTR command_line) {
         command = "theme";
     } else if (std::wstring_view(argv[1]) == L"--inject" && argc >= 3) {
         command = "inject:" + utf8_from_wide(argv[2]);
+    } else if (std::wstring_view(argv[1]) == L"--export" && argc >= 4) {
+        command = "export:" + utf8_from_wide(argv[2]) + ":" + utf8_from_wide(argv[3]);
     } else {
         LocalFree(static_cast<HLOCAL>(argv));
         return 2;

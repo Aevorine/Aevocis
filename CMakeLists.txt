@@ -28,6 +28,7 @@ add_library(aevocis_windows STATIC
     src/platform/windows/app_log.cpp
     src/platform/windows/global_hotkey.cpp
     src/platform/windows/autostart.cpp
+    src/platform/windows/history_export.cpp
     src/platform/windows/command_pipe.cpp
     src/platform/windows/crash_reporter.cpp
     src/platform/windows/keyboard_hook.cpp
