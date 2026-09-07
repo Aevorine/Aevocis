@@ -8,6 +8,7 @@
 #include "aevocis/platform/windows/app_log.hpp"
 #include "aevocis/platform/windows/global_hotkey.hpp"
 #include "aevocis/platform/windows/crash_reporter.hpp"
+#include "aevocis/platform/windows/external_pipeline.hpp"
 #include "aevocis/platform/windows/history_export.hpp"
 #include "aevocis/platform/windows/command_pipe.hpp"
 #include "aevocis/platform/windows/autostart.hpp"
@@ -371,7 +372,17 @@ private:
         post_state(core::AppState::PostProcessing);
         core::TextPipelineOptions options;
         options.append_sentence_punctuation = settings_.punctuation;
-        const auto processed = core::TextPipeline::process(result.text, terms_store_.terms(), options);
+        auto processed = core::TextPipeline::process(result.text, terms_store_.terms(), options);
+        // F1: opt-in external post-processing hook. Runs after the built-in pipeline (term
+        // rules, punctuation, casing) so the external tool sees the already-cleaned text, not
+        // the raw recognizer output. A broken/slow/missing tool degrades to "text unchanged" --
+        // never blocks or corrupts the dictation.
+        if (!settings_.external_pipeline_path.empty()) {
+            if (const auto piped = platform::windows::ExternalPipeline::run(settings_.external_pipeline_path, processed.text);
+                piped.has_value() && !piped->empty()) {
+                processed.text = *piped;
+            }
+        }
         if (processed.text.empty() || !target.still_valid()) {
             (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::TargetChanged);
             post_error(core::ErrorCode::TargetChanged);

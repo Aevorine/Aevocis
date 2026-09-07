@@ -81,6 +81,50 @@ namespace {
     }
 }
 
+[[nodiscard]] std::string json_string(std::string_view json, std::string_view key, std::string_view fallback) {
+    const std::string needle = "\"" + std::string(key) + "\"";
+    const std::size_t key_position = json.find(needle);
+    if (key_position == std::string_view::npos) {
+        return std::string(fallback);
+    }
+    const std::size_t colon = json.find(':', key_position + needle.size());
+    if (colon == std::string_view::npos) {
+        return std::string(fallback);
+    }
+    const std::size_t open_quote = json.find('"', colon);
+    if (open_quote == std::string_view::npos) {
+        return std::string(fallback);
+    }
+    std::size_t position = open_quote + 1;
+    std::string value;
+    while (position < json.size() && json[position] != '"') {
+        if (json[position] == '\\' && position + 1 < json.size()) {
+            ++position;
+        }
+        value.push_back(json[position]);
+        ++position;
+    }
+    return value;
+}
+
+[[nodiscard]] std::wstring utf8_to_wide(std::string_view utf8) {
+    if (utf8.empty()) return {};
+    const int length = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+    if (length <= 0) return {};
+    std::wstring wide(static_cast<std::size_t>(length), L'\0');
+    (void)MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), wide.data(), length);
+    return wide;
+}
+
+[[nodiscard]] std::string wide_to_utf8(const std::wstring& wide) {
+    if (wide.empty()) return {};
+    const int length = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
+    if (length <= 0) return {};
+    std::string result(static_cast<std::size_t>(length), '\0');
+    (void)WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), result.data(), length, nullptr, nullptr);
+    return result;
+}
+
 [[nodiscard]] bool json_bool(std::string_view json, std::string_view key, bool fallback) {
     const std::string needle = "\"" + std::string(key) + "\"";
     const std::size_t key_position = json.find(needle);
@@ -164,6 +208,7 @@ AppSettings SettingsStore::load() const {
     settings.punctuation = json_bool(json, "punctuation", settings.punctuation);
     settings.draft_confirmation = json_bool(json, "draft_confirmation", settings.draft_confirmation);
     settings.autostart = json_bool(json, "autostart", settings.autostart);
+    settings.external_pipeline_path = utf8_to_wide(json_string(json, "external_pipeline_path", ""));
     return settings;
 }
 
@@ -188,7 +233,8 @@ bool SettingsStore::save(const AppSettings& settings) const noexcept {
          << "  \"draft_confirmation\": " << (settings.draft_confirmation ? "true" : "false") << ",\n"
          << "  \"autostart\": " << (settings.autostart ? "true" : "false") << ",\n"
          << "  \"history_retention_days\": " << settings.history_retention_days << ",\n"
-         << "  \"theme\": " << settings.theme << "\n}\n";
+         << "  \"theme\": " << settings.theme << ",\n"
+         << "  \"external_pipeline_path\": \"" << escape_json(wide_to_utf8(settings.external_pipeline_path)) << "\"\n}\n";
     return Storage::atomic_write(Storage::data_directory() / L"settings.json", json.str());
 }
 

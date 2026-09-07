@@ -32,6 +32,7 @@ add_library(aevocis_windows STATIC
     src/platform/windows/history_export.cpp
     src/platform/windows/command_pipe.cpp
     src/platform/windows/crash_reporter.cpp
+    src/platform/windows/external_pipeline.cpp
     src/platform/windows/keyboard_hook.cpp
     src/platform/windows/single_instance.cpp
     src/platform/windows/sensevoice_recognizer.cpp
