@@ -41,6 +41,7 @@ add_library(aevocis_windows STATIC
     src/platform/windows/tray_icon.cpp
     src/platform/windows/update_manager.cpp
     src/platform/windows/wasapi_recorder.cpp
+    src/ui/command_palette.cpp
     src/ui/main_window.cpp
     src/ui/recording_overlay.cpp
 )

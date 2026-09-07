@@ -22,6 +22,7 @@
 #include "aevocis/platform/windows/update_manager.hpp"
 #include "aevocis/platform/windows/wasapi_recorder.hpp"
 #include "aevocis/version.hpp"
+#include "aevocis/ui/command_palette.hpp"
 #include "aevocis/ui/main_window.hpp"
 #include "aevocis/ui/recording_overlay.hpp"
 
@@ -53,6 +54,7 @@ using platform::windows::WasapiRecorder;
 
 constexpr int kShowHideHotkeyId = 1;
 constexpr int kUndoHotkeyId = 2;
+constexpr int kCommandPaletteHotkeyId = 3;
 // B3: idle-unload watchdog. Checked every minute; the model is released after 10 consecutive
 // idle minutes, trading a one-time reload latency on the next dictation for not holding the
 // model's working set in memory during long idle stretches -- the counterpart the app's
@@ -92,7 +94,8 @@ constexpr ULONGLONG kIdleUnloadThresholdMs = 10ULL * 60ULL * 1000ULL;
 class Application {
 public:
     explicit Application(HINSTANCE instance)
-        : instance_(instance), instance_guard_(L"Local\\AevocisNativeCppSingleton"), settings_(), window_(instance), overlay_(instance) {
+        : instance_(instance), instance_guard_(L"Local\\AevocisNativeCppSingleton"), settings_(), window_(instance), overlay_(instance),
+          command_palette_(instance) {
         settings_ = settings_store_.load();
         toggle_mode_.store(settings_.toggle_mode);
         history_store_.load();
@@ -146,6 +149,9 @@ public:
         // rebind UI); registration failure (e.g. another app already owns it) degrades to
         // "voice undo still works", never a crash.
         (void)undo_hotkey_.register_hotkey(window_.handle(), kUndoHotkeyId, MOD_CONTROL | MOD_ALT, 'Z');
+        // C3: Ctrl+Shift+P by the now-common editor convention for "command palette".
+        (void)command_palette_hotkey_.register_hotkey(window_.handle(), kCommandPaletteHotkeyId, MOD_CONTROL | MOD_SHIFT, 'P');
+        command_palette_.set_commands(build_palette_commands());
         last_activity_tick_ = GetTickCount64();
         (void)SetTimer(window_.handle(), kIdleTimerId, kIdleTimerIntervalMs, nullptr);
         (void)keyboard_hook_.install(window_.handle(), platform::windows::kKeyboardMessage);
@@ -167,6 +173,10 @@ private:
         }
         if (message == WM_HOTKEY && static_cast<int>(wparam) == kUndoHotkeyId) {
             request_undo();
+            return true;
+        }
+        if (message == WM_HOTKEY && static_cast<int>(wparam) == kCommandPaletteHotkeyId) {
+            command_palette_.toggle(window_.handle());
             return true;
         }
         if (message == WM_TIMER && wparam == kIdleTimerId) {
@@ -593,6 +603,40 @@ private:
         return stats;
     }
 
+    // C3: every entry here just calls something already reachable via tray menu / hotkey /
+    // WM_COMMAND -- the palette is a faster way to reach existing actions, not a new surface of
+    // its own logic.
+    [[nodiscard]] std::vector<ui::PaletteCommand> build_palette_commands() {
+        std::vector<ui::PaletteCommand> commands;
+        commands.push_back({L"显示 / 隐藏窗口", [this] { window_.show_or_hide(); }});
+        commands.push_back({L"切换主题", [this] { window_.toggle_theme(); }});
+        commands.push_back({L"打开设置", [this] {
+                                window_.open_settings();
+                                window_.show();
+                            }});
+        commands.push_back({L"撤销上次输入", [this] { request_undo(); }});
+        commands.push_back({L"清空历史记录", [this] {
+                                std::scoped_lock lock(history_mutex_);
+                                if (history_store_.clear()) {
+                                    window_.clear_history();
+                                }
+                            }});
+        commands.push_back({L"检查更新", [this] {
+                                platform::windows::UpdateManager::check_and_install_async(window_.handle(), std::wstring(kVersion),
+                                                                                          executable_path());
+                            }});
+        commands.push_back({L"切换开机自启", [this] {
+                                const bool enabled = platform::windows::Autostart::enabled();
+                                const bool updated = platform::windows::Autostart::set_enabled(!enabled, executable_path());
+                                if (updated) {
+                                    settings_.autostart = !enabled;
+                                    (void)settings_store_.save(settings_);
+                                }
+                            }});
+        commands.push_back({L"退出 Aevocis", [] { PostQuitMessage(0); }});
+        return commands;
+    }
+
     [[nodiscard]] std::string model_directory() const {
         const auto executable = executable_path();
         if (executable.empty()) {
@@ -636,6 +680,8 @@ private:
     TrayIcon tray_;
     GlobalHotkey show_hide_hotkey_;
     GlobalHotkey undo_hotkey_;
+    GlobalHotkey command_palette_hotkey_;
+    ui::CommandPalette command_palette_;
     // Written from both the UI thread (run()/handle_message) and scheduler worker threads
     // (run_session) -- atomic rather than a plain ULONGLONG to avoid a real data race, not just
     // a theoretical one, since x64's natural word-tearing-free store isn't a language guarantee.
