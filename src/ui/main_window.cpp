@@ -32,12 +32,44 @@ struct Colors {
 };
 
 [[nodiscard]] Colors colors(ThemeMode theme) noexcept {
-    if (theme == ThemeMode::DarkGlass) {
+    switch (theme) {
+    case ThemeMode::DarkGlass:
         return {D2D1::ColorF(0x10151D), D2D1::ColorF(0x17202B), D2D1::ColorF(0xF0F4F8), D2D1::ColorF(0x9BA9B8),
                 D2D1::ColorF(0x62D7C5), D2D1::ColorF(0x2D3A49)};
+    case ThemeMode::HighContrast:
+        // D1: WCAG-AA-level contrast (near-black ink on near-white surface, thick dark border)
+        // for users who specifically need maximum legibility over long-attention comfort.
+        return {D2D1::ColorF(0xFFFFFF), D2D1::ColorF(0xFFFFFF), D2D1::ColorF(0x000000), D2D1::ColorF(0x1A1A1A),
+                D2D1::ColorF(0x0047AB), D2D1::ColorF(0x000000)};
+    case ThemeMode::Sepia:
+        // D1: warm low-blue-light palette for long evening sessions.
+        return {D2D1::ColorF(0xEFE3CE), D2D1::ColorF(0xF7EEDD), D2D1::ColorF(0x4A3B28), D2D1::ColorF(0x8A7657),
+                D2D1::ColorF(0xB8763D), D2D1::ColorF(0xD9C7A3)};
+    case ThemeMode::Paper:
+    default:
+        return {D2D1::ColorF(0xF5F2EA), D2D1::ColorF(0xFFFDF8), D2D1::ColorF(0x29333D), D2D1::ColorF(0x77818A),
+                D2D1::ColorF(0x2A9D8F), D2D1::ColorF(0xDDD7CA)};
     }
-    return {D2D1::ColorF(0xF5F2EA), D2D1::ColorF(0xFFFDF8), D2D1::ColorF(0x29333D), D2D1::ColorF(0x77818A),
-            D2D1::ColorF(0x2A9D8F), D2D1::ColorF(0xDDD7CA)};
+}
+
+[[nodiscard]] const wchar_t* theme_name(ThemeMode theme) noexcept {
+    switch (theme) {
+    case ThemeMode::DarkGlass: return L"Dark Glass";
+    case ThemeMode::HighContrast: return L"High Contrast";
+    case ThemeMode::Sepia: return L"Sepia";
+    case ThemeMode::Paper:
+    default: return L"Paper";
+    }
+}
+
+[[nodiscard]] ThemeMode next_theme(ThemeMode theme) noexcept {
+    switch (theme) {
+    case ThemeMode::Paper: return ThemeMode::DarkGlass;
+    case ThemeMode::DarkGlass: return ThemeMode::HighContrast;
+    case ThemeMode::HighContrast: return ThemeMode::Sepia;
+    case ThemeMode::Sepia:
+    default: return ThemeMode::Paper;
+    }
 }
 
 [[nodiscard]] std::wstring state_label(core::AppState state, core::ErrorCode error) {
@@ -138,11 +170,18 @@ void MainWindow::hide() noexcept { ShowWindow(hwnd_, SW_HIDE); }
 bool MainWindow::visible() const noexcept { return hwnd_ != nullptr && IsWindowVisible(hwnd_) != FALSE; }
 
 void MainWindow::toggle_theme() noexcept {
-    theme_ = theme_ == ThemeMode::Paper ? ThemeMode::DarkGlass : ThemeMode::Paper;
+    theme_ = next_theme(theme_);
     if (theme_handler_) {
         theme_handler_();
     }
     InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::set_stats(SessionStats stats) noexcept {
+    stats_ = stats;
+    if (settings_open_) {
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
 }
 
 void MainWindow::open_settings() noexcept {
@@ -218,27 +257,27 @@ LRESULT MainWindow::handle_window_message(UINT message, WPARAM wparam, LPARAM lp
         return 0;
     case WM_LBUTTONUP: {
         const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        if (settings_open_ && point.x >= 28 && point.y >= 24 && point.y <= 64) {
-            settings_open_ = false;
-            InvalidateRect(hwnd_, nullptr, FALSE);
-        } else if (settings_open_ && point.y >= 148 && point.y <= 238) {
-            toggle_mode_ = !toggle_mode_;
-            if (trigger_mode_handler_) {
-                trigger_mode_handler_();
-            }
-            InvalidateRect(hwnd_, nullptr, FALSE);
-        } else if (point.x >= kWidth - 148 && point.x <= kWidth - 82 && point.y <= 64) {
-            toggle_theme();
-        } else if (point.x >= kWidth - 76 && point.y <= 64) {
-            settings_open_ = true;
-            InvalidateRect(hwnd_, nullptr, FALSE);
-        } else if (!settings_open_ && point.x >= kWidth - 120 && point.y >= 376 && point.y <= 424) {
-            if (history_clear_handler_) {
-                history_clear_handler_();
+        const auto regions = build_focus_regions();
+        for (const auto& region : regions) {
+            if (point.x >= region.rect.left && point.x <= region.rect.right && point.y >= region.rect.top &&
+                point.y <= region.rect.bottom) {
+                if (region.activate) {
+                    region.activate();
+                }
+                break;
             }
         }
         return 0;
     }
+    case WM_KEYDOWN:
+        handle_key_down(wparam);
+        return 0;
+    case WM_SETFOCUS:
+        if (focus_index_ < 0) {
+            focus_index_ = 0;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        return 0;
     case WM_CLOSE:
         hide();
         return 0;
@@ -246,6 +285,56 @@ LRESULT MainWindow::handle_window_message(UINT message, WPARAM wparam, LPARAM lp
         return 0;
     default:
         return DefWindowProcW(hwnd_, message, wparam, lparam);
+    }
+}
+
+std::vector<MainWindow::FocusRegion> MainWindow::build_focus_regions() {
+    std::vector<FocusRegion> regions;
+    // D4: identical rects to create_tooltips() by construction -- every region a mouse can
+    // click and hover a tooltip on is also a region Tab can reach and Enter/Space can activate.
+    if (settings_open_) {
+        regions.push_back({RECT{12, 12, 96, 68}, [this] {
+                                settings_open_ = false;
+                                focus_index_ = 0;
+                                InvalidateRect(hwnd_, nullptr, FALSE);
+                            }});
+        regions.push_back({RECT{20, 132, 340, 244}, [this] {
+                                toggle_mode_ = !toggle_mode_;
+                                if (trigger_mode_handler_) trigger_mode_handler_();
+                                InvalidateRect(hwnd_, nullptr, FALSE);
+                            }});
+    }
+    regions.push_back({RECT{kWidth - 150, 12, kWidth - 82, 62}, [this] { toggle_theme(); }});
+    regions.push_back({RECT{kWidth - 76, 12, kWidth - 20, 62}, [this] {
+                            settings_open_ = true;
+                            focus_index_ = 0;
+                            InvalidateRect(hwnd_, nullptr, FALSE);
+                        }});
+    if (!settings_open_) {
+        regions.push_back({RECT{kWidth - 126, 364, kWidth - 20, 430}, [this] {
+                                if (history_clear_handler_) history_clear_handler_();
+                            }});
+    }
+    return regions;
+}
+
+void MainWindow::handle_key_down(WPARAM virtual_key) noexcept {
+    const auto regions = build_focus_regions();
+    if (regions.empty()) {
+        return;
+    }
+    if (virtual_key == VK_TAB) {
+        const bool shift_held = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const int count = static_cast<int>(regions.size());
+        focus_index_ = focus_index_ < 0 ? 0 : (focus_index_ + (shift_held ? -1 : 1) + count) % count;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if ((virtual_key == VK_RETURN || virtual_key == VK_SPACE) && focus_index_ >= 0 &&
+        focus_index_ < static_cast<int>(regions.size())) {
+        if (regions[static_cast<std::size_t>(focus_index_)].activate) {
+            regions[static_cast<std::size_t>(focus_index_)].activate();
+        }
     }
 }
 
@@ -319,7 +408,13 @@ void MainWindow::render() noexcept {
         draw_text(L"快捷键", D2D1::RectF(40, 112, 170, 146), 18.0F);
         draw_text(toggle_mode_ ? L"当前  切换模式" : L"当前  按住模式", D2D1::RectF(40, 158, 300, 190), 15.0F);
         draw_text(L"外观", D2D1::RectF(40, 286, 170, 320), 18.0F);
-        draw_text(theme_ == ThemeMode::Paper ? L"Paper" : L"Dark Glass", D2D1::RectF(40, 332, 260, 366), 16.0F, true);
+        draw_text(theme_name(theme_), D2D1::RectF(40, 332, 260, 366), 16.0F, true);
+        // C5: today / all-time dictation counts and total characters, computed by the caller
+        // from HistoryStore and handed in via set_stats -- purely a readout, no click target.
+        draw_text(L"使用统计", D2D1::RectF(380, 112, 560, 146), 18.0F);
+        draw_text(L"今日  " + std::to_wstring(stats_.dictations_today) + L" 次", D2D1::RectF(380, 158, 620, 188), 15.0F, true);
+        draw_text(L"累计  " + std::to_wstring(stats_.dictations_total) + L" 次", D2D1::RectF(380, 192, 620, 222), 15.0F, true);
+        draw_text(L"累计字数  " + std::to_wstring(stats_.characters_total), D2D1::RectF(380, 226, 640, 256), 15.0F, true);
     } else {
         fill(D2D1::RectF(0, 68, static_cast<float>(kWidth), 292), palette.surface);
         fill(D2D1::RectF(260, 118, 420, 278), palette.accent);
@@ -330,6 +425,21 @@ void MainWindow::render() noexcept {
             draw_text(L"", D2D1::RectF(32, 426, 620, 452), 14.0F);
         } else {
             draw_text(history_.front(), D2D1::RectF(32, 426, 638, 454), 14.0F);
+        }
+    }
+    // D4: visible focus ring around whichever region Tab currently lands on, only while this
+    // window actually holds keyboard focus -- keeps mouse-only use visually unchanged.
+    if (focus_index_ >= 0 && GetFocus() == hwnd_) {
+        const auto regions = build_focus_regions();
+        if (focus_index_ < static_cast<int>(regions.size())) {
+            const RECT& region = regions[static_cast<std::size_t>(focus_index_)].rect;
+            brush.Reset();
+            (void)render_target_->CreateSolidColorBrush(palette.accent, &brush);
+            if (brush != nullptr) {
+                render_target_->DrawRectangle(D2D1::RectF(static_cast<float>(region.left) - 2.0F, static_cast<float>(region.top) - 2.0F,
+                                                          static_cast<float>(region.right) + 2.0F, static_cast<float>(region.bottom) + 2.0F),
+                                              brush.Get(), 2.0F);
+            }
         }
     }
     const HRESULT result = render_target_->EndDraw();

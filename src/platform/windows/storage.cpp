@@ -137,15 +137,29 @@ std::string Storage::read_text(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+namespace {
+constexpr int kMaxThemeIndex = 3;
+}  // namespace
+
 AppSettings SettingsStore::load() const {
     AppSettings settings;
-    const std::string json = Storage::read_text(Storage::data_directory() / L"settings.json");
+    std::string json = Storage::read_text(Storage::data_directory() / L"settings.json");
+    // E3: a primary file that exists but carries none of the expected keys (truncated by a
+    // crash mid-write before the atomic rename ever lands, or hand-edited into garbage) is
+    // treated as corrupt and the last-known-good backup is tried instead, rather than
+    // silently falling back straight to hard defaults and discarding the user's real settings.
+    if (!json.empty() && json.find("push_to_talk_virtual_key") == std::string::npos) {
+        const std::string backup = Storage::read_text(Storage::data_directory() / L"settings.json.bak");
+        if (!backup.empty()) {
+            json = backup;
+        }
+    }
     if (json.empty()) return settings;
     settings.push_to_talk_virtual_key = json_number(json, "push_to_talk_virtual_key", settings.push_to_talk_virtual_key);
     settings.show_hide_modifiers = json_number(json, "show_hide_modifiers", settings.show_hide_modifiers);
     settings.show_hide_virtual_key = json_number(json, "show_hide_virtual_key", settings.show_hide_virtual_key);
     settings.history_retention_days = std::clamp(json_number(json, "history_retention_days", settings.history_retention_days), 1U, 3650U);
-    settings.theme = static_cast<int>(std::min(json_number(json, "theme", 0U), 1U));
+    settings.theme = static_cast<int>(std::min(json_number(json, "theme", 0U), static_cast<std::uint32_t>(kMaxThemeIndex)));
     settings.toggle_mode = json_bool(json, "toggle_mode", settings.toggle_mode);
     settings.punctuation = json_bool(json, "punctuation", settings.punctuation);
     settings.draft_confirmation = json_bool(json, "draft_confirmation", settings.draft_confirmation);
@@ -154,6 +168,16 @@ AppSettings SettingsStore::load() const {
 }
 
 bool SettingsStore::save(const AppSettings& settings) const noexcept {
+    try {
+        // E3: roll the previous good settings.json into settings.json.bak before overwriting,
+        // so a future corrupt write still leaves one prior-good snapshot load() can recover from.
+        const auto primary = Storage::data_directory() / L"settings.json";
+        const std::string previous = Storage::read_text(primary);
+        if (!previous.empty()) {
+            (void)Storage::atomic_write(Storage::data_directory() / L"settings.json.bak", previous);
+        }
+    } catch (...) {
+    }
     std::ostringstream json;
     json << "{\n"
          << "  \"push_to_talk_virtual_key\": " << settings.push_to_talk_virtual_key << ",\n"
@@ -225,6 +249,20 @@ void TermDictionaryStore::load() {
             index += 3;
         }
     }
+}
+
+bool TermDictionaryStore::learn(core::TermRule rule) noexcept {
+    if (rule.source.empty() || rule.replacement.empty()) {
+        return false;
+    }
+    const auto existing = std::find_if(terms_.begin(), terms_.end(),
+                                       [&rule](const core::TermRule& term) { return term.source == rule.source; });
+    if (existing != terms_.end()) {
+        existing->replacement = std::move(rule.replacement);
+    } else {
+        terms_.push_back(std::move(rule));
+    }
+    return save(terms_);
 }
 
 bool TermDictionaryStore::save(const std::vector<core::TermRule>& terms) const noexcept {

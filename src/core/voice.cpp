@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <initializer_list>
 #include <string>
 
 namespace aevocis::core {
@@ -81,6 +82,59 @@ std::vector<VoiceCommand> VoiceCommandMatcher::defaults() {
             {"取消", VoiceCommandAction::Cancel},
             {"换行", VoiceCommandAction::SendEnter},
             {"全部大写", VoiceCommandAction::UppercaseSuffix}};
+}
+
+namespace {
+
+[[nodiscard]] std::size_t find_any(std::string_view text, std::initializer_list<std::string_view> needles, std::size_t& matched_length) {
+    for (const auto needle : needles) {
+        const std::size_t position = text.find(needle);
+        if (position != std::string_view::npos) {
+            matched_length = needle.size();
+            return position;
+        }
+    }
+    matched_length = 0;
+    return std::string_view::npos;
+}
+
+[[nodiscard]] std::string_view trim_view(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+}  // namespace
+
+std::optional<TermLearnMatch> VoiceCommandMatcher::match_learn_term(std::string_view text) {
+    std::string_view remainder = trim_view(text);
+    bool prefixed = false;
+    for (const std::string_view lead : {"记住", "remember"}) {
+        if (remainder.size() > lead.size() && remainder.compare(0, lead.size(), lead) == 0) {
+            remainder.remove_prefix(lead.size());
+            prefixed = true;
+            break;
+        }
+    }
+    if (!prefixed) {
+        return std::nullopt;
+    }
+    remainder = trim_view(remainder);
+    std::size_t separator_length = 0;
+    const std::size_t separator = find_any(remainder, {"读作", "念作", "写作", " as ", "是"}, separator_length);
+    if (separator == std::string_view::npos || separator == 0) {
+        return std::nullopt;
+    }
+    const std::string_view source = trim_view(remainder.substr(0, separator));
+    const std::string_view replacement = trim_view(remainder.substr(separator + separator_length));
+    if (source.empty() || replacement.empty()) {
+        return std::nullopt;
+    }
+    return TermLearnMatch{std::string(source), std::string(replacement)};
 }
 
 std::optional<CommandMatch> VoiceCommandMatcher::match(std::string_view text,

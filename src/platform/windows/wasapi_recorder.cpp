@@ -1,6 +1,7 @@
 #include "aevocis/platform/windows/wasapi_recorder.hpp"
 
 #include <audioclient.h>
+#include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <synchapi.h>
 #include <windows.h>
@@ -25,6 +26,43 @@ namespace {
         return IsEqualGUID(extensible->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) != FALSE;
     }
     return false;
+}
+
+// E4: prefer the Communications-role default endpoint over the Multimedia-role one when they
+// differ and the Communications endpoint is not muted -- this is Windows' own signal that a
+// headset/handsfree device was just connected, so a session started right after plugging in a
+// Bluetooth headset records from it instead of a stale built-in mic. Falls back to the
+// Multimedia-role (general) default whenever the two agree, resolution fails, or the
+// Communications endpoint is muted, so behavior never regresses below the previous
+// single-endpoint lookup.
+[[nodiscard]] ComPtr<IMMDevice> resolve_capture_device(IMMDeviceEnumerator& enumerator) noexcept {
+    ComPtr<IMMDevice> communications;
+    ComPtr<IMMDevice> multimedia;
+    const HRESULT communications_result = enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications, &communications);
+    const HRESULT multimedia_result = enumerator.GetDefaultAudioEndpoint(eCapture, eConsole, &multimedia);
+    if (FAILED(multimedia_result)) {
+        return communications;
+    }
+    if (FAILED(communications_result)) {
+        return multimedia;
+    }
+    LPWSTR communications_id = nullptr;
+    LPWSTR multimedia_id = nullptr;
+    const bool same_device = SUCCEEDED(communications->GetId(&communications_id)) && SUCCEEDED(multimedia->GetId(&multimedia_id)) &&
+                             communications_id != nullptr && multimedia_id != nullptr && wcscmp(communications_id, multimedia_id) == 0;
+    if (communications_id != nullptr) CoTaskMemFree(communications_id);
+    if (multimedia_id != nullptr) CoTaskMemFree(multimedia_id);
+    if (same_device) {
+        return multimedia;
+    }
+    ComPtr<IAudioEndpointVolume> volume;
+    if (SUCCEEDED(communications->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, &volume)) && volume != nullptr) {
+        BOOL muted = FALSE;
+        if (SUCCEEDED(volume->GetMute(&muted)) && muted != FALSE) {
+            return multimedia;
+        }
+    }
+    return communications;
 }
 
 [[nodiscard]] float pcm_sample(const std::byte* source, WORD bits) noexcept {
@@ -119,7 +157,8 @@ void WasapiRecorder::capture_loop(std::stop_token stop) noexcept {
     HANDLE event = nullptr;
     HRESULT result = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
     if (SUCCEEDED(result)) {
-        result = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
+        device = resolve_capture_device(*enumerator.Get());
+        result = device != nullptr ? S_OK : E_FAIL;
     }
     if (SUCCEEDED(result)) {
         result = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client);

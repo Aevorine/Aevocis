@@ -43,4 +43,8 @@ LONG WINAPI unhandled_exception(EXCEPTION_POINTERS* exception) noexcept {
 
 void CrashReporter::install() noexcept { (void)SetUnhandledExceptionFilter(unhandled_exception); }
 
+void CrashReporter::register_auto_restart() noexcept {
+    (void)RegisterApplicationRestart(nullptr, RESTART_NO_REBOOT);
+}
+
 }  // namespace aevocis::platform::windows

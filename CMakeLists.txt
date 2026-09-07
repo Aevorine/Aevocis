@@ -15,6 +15,8 @@ else()
 endif()
 
 add_library(aevocis_core STATIC
+    src/core/audio_gate.cpp
+    src/core/chunked_recognition.cpp
     src/core/recognizer.cpp
     src/core/task_scheduler.cpp
     src/core/text_pipeline.cpp
@@ -23,6 +25,7 @@ add_library(aevocis_core STATIC
 target_include_directories(aevocis_core PUBLIC include)
 
 add_library(aevocis_windows STATIC
+    src/platform/windows/app_log.cpp
     src/platform/windows/global_hotkey.cpp
     src/platform/windows/autostart.cpp
     src/platform/windows/command_pipe.cpp

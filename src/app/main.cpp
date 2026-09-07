@@ -1,7 +1,10 @@
+#include "aevocis/core/audio_gate.hpp"
+#include "aevocis/core/chunked_recognition.hpp"
 #include "aevocis/core/recognizer.hpp"
 #include "aevocis/core/task_scheduler.hpp"
 #include "aevocis/core/text_pipeline.hpp"
 #include "aevocis/core/voice.hpp"
+#include "aevocis/platform/windows/app_log.hpp"
 #include "aevocis/platform/windows/global_hotkey.hpp"
 #include "aevocis/platform/windows/crash_reporter.hpp"
 #include "aevocis/platform/windows/command_pipe.hpp"
@@ -23,6 +26,8 @@
 #include <windows.h>
 
 #include <condition_variable>
+#include <chrono>
+#include <ctime>
 #include <deque>
 #include <filesystem>
 #include <atomic>
@@ -120,6 +125,7 @@ public:
         for (const auto& record : history_store_.records()) {
             window_.add_history(record.text);
         }
+        window_.set_stats(compute_stats());
         (void)tray_.install(window_.handle(), platform::windows::kTrayMessage, icon_);
         (void)overlay_.create();
         (void)command_server_.start([this](std::string command) { return handle_command_request(std::move(command)); });
@@ -170,6 +176,7 @@ private:
             for (auto& text : pending) {
                 window_.add_history(std::move(text));
             }
+            window_.set_stats(compute_stats());
             return true;
         }
         if (message == platform::windows::kCommandMessage) {
@@ -292,6 +299,14 @@ private:
             post_state(core::AppState::Cancelled);
             return;
         }
+        // A2: silence/too-short gate -- runs before the recognizer ever sees the buffer, so a
+        // mistrigger or near-silent capture can never produce hallucinated model output. This is
+        // a quiet no-op (Idle), not a Failed transition, since nothing actually went wrong.
+        if (!core::AudioGate::should_recognize(audio.samples, audio.sample_rate)) {
+            (void)scheduler_.transition(id, core::AppState::Idle);
+            post_state(core::AppState::Idle);
+            return;
+        }
         (void)scheduler_.transition(id, core::AppState::Recognizing);
         post_state(core::AppState::Recognizing);
         if (!recognizer_.ready() && !recognizer_.load(model_directory())) {
@@ -299,7 +314,10 @@ private:
             post_error(core::ErrorCode::RecognitionUnavailable);
             return;
         }
-        const core::RecognitionResult result = recognizer_.recognize(audio.samples, audio.sample_rate, stop);
+        // A7: transparently windows+stitches long recordings; behaves exactly like a direct
+        // recognizer_.recognize() call for anything under one window, so short dictations are
+        // unaffected.
+        const core::RecognitionResult result = core::ChunkedRecognizer::recognize(recognizer_, audio.samples, audio.sample_rate, stop);
         if (!result.ok()) {
             (void)scheduler_.transition(id, core::AppState::Failed, result.error);
             post_error(result.error);
@@ -313,6 +331,14 @@ private:
         if (processed.text.empty() || !target.still_valid()) {
             (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::TargetChanged);
             post_error(core::ErrorCode::TargetChanged);
+            return;
+        }
+        // A6: "记住 A 读作 B" is handled before the fixed voice-command list -- it teaches a
+        // term rule instead of injecting text, and never touches history (nothing was dictated).
+        if (const auto learned = core::VoiceCommandMatcher::match_learn_term(processed.text); learned.has_value()) {
+            (void)terms_store_.learn({learned->source, learned->replacement});
+            (void)scheduler_.transition(id, core::AppState::Idle);
+            post_state(core::AppState::Idle);
             return;
         }
         if (const auto command = core::VoiceCommandMatcher::match(processed.text, voice_commands_); command.has_value()) {
@@ -393,11 +419,13 @@ private:
     }
 
     void post_state(core::AppState state) const noexcept {
+        platform::windows::AppLog::record_state(state);
         (void)PostMessageW(window_.handle(), platform::windows::kStatusMessage, static_cast<WPARAM>(state),
                             static_cast<LPARAM>(core::ErrorCode::None));
     }
 
     void post_error(core::ErrorCode error) const noexcept {
+        platform::windows::AppLog::record_error(core::AppState::Failed, error);
         (void)PostMessageW(window_.handle(), platform::windows::kStatusMessage, static_cast<WPARAM>(core::AppState::Failed),
                             static_cast<LPARAM>(error));
     }
@@ -449,6 +477,31 @@ private:
         }
         (void)PostMessageW(window_.handle(), platform::windows::kCommandMessage, 0, 0);
         return "{\"accepted\":true}\n";
+    }
+
+    // C5: dictations_today only counts records carrying a real epoch_seconds (added during a
+    // process run since history persistence, by design, has never stored timestamps to disk --
+    // see storage.cpp) -- an honest undercount across a restart on the same calendar day rather
+    // than a fabricated number. Totals and character counts are exact regardless.
+    [[nodiscard]] ui::SessionStats compute_stats() const {
+        ui::SessionStats stats;
+        const auto midnight = [] {
+            const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            tm local{};
+            localtime_s(&local, &now);
+            local.tm_hour = 0;
+            local.tm_min = 0;
+            local.tm_sec = 0;
+            return static_cast<std::int64_t>(_mktime64(&local));
+        }();
+        for (const auto& record : history_store_.records()) {
+            stats.dictations_total += 1;
+            stats.characters_total += record.text.size();
+            if (record.epoch_seconds != 0 && record.epoch_seconds >= midnight) {
+                stats.dictations_today += 1;
+            }
+        }
+        return stats;
     }
 
     [[nodiscard]] std::string model_directory() const {
@@ -578,6 +631,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int) {
     if (command_result >= 0) return command_result;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     aevocis::platform::windows::CrashReporter::install();
+    aevocis::platform::windows::CrashReporter::register_auto_restart();
     Application application(instance);
     return application.run();
 }

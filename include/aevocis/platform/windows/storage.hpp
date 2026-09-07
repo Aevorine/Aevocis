@@ -58,6 +58,9 @@ public:
     void load();
     [[nodiscard]] bool save(const std::vector<core::TermRule>& terms) const noexcept;
     [[nodiscard]] const std::vector<core::TermRule>& terms() const noexcept { return terms_; }
+    // A6: appends a rule learned from a "记住 A 读作 B" utterance, replacing any existing
+    // rule with the same source so re-teaching a term overwrites rather than duplicates.
+    [[nodiscard]] bool learn(core::TermRule rule) noexcept;
 
 private:
     std::vector<core::TermRule> terms_;
