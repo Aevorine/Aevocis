@@ -1,0 +1,4 @@
+CompileFlags:
+  CompilationDatabase: build/x64-release
+Diagnostics:
+  UnusedIncludes: None

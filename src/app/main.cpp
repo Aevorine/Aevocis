@@ -1,0 +1,583 @@
+#include "aevocis/core/recognizer.hpp"
+#include "aevocis/core/task_scheduler.hpp"
+#include "aevocis/core/text_pipeline.hpp"
+#include "aevocis/core/voice.hpp"
+#include "aevocis/platform/windows/global_hotkey.hpp"
+#include "aevocis/platform/windows/crash_reporter.hpp"
+#include "aevocis/platform/windows/command_pipe.hpp"
+#include "aevocis/platform/windows/autostart.hpp"
+#include "aevocis/platform/windows/keyboard_hook.hpp"
+#include "aevocis/platform/windows/messages.hpp"
+#include "aevocis/platform/windows/single_instance.hpp"
+#include "aevocis/platform/windows/sensevoice_recognizer.hpp"
+#include "aevocis/platform/windows/storage.hpp"
+#include "aevocis/platform/windows/target_window.hpp"
+#include "aevocis/platform/windows/text_injector.hpp"
+#include "aevocis/platform/windows/tray_icon.hpp"
+#include "aevocis/platform/windows/update_manager.hpp"
+#include "aevocis/platform/windows/wasapi_recorder.hpp"
+#include "aevocis/version.hpp"
+#include "aevocis/ui/main_window.hpp"
+#include "aevocis/ui/recording_overlay.hpp"
+
+#include <windows.h>
+
+#include <condition_variable>
+#include <deque>
+#include <filesystem>
+#include <atomic>
+#include <cwchar>
+#include <mutex>
+#include <string>
+#include <string_view>
+#include <vector>
+#include <shellapi.h>
+
+namespace {
+
+using namespace aevocis;
+using platform::windows::GlobalHotkey;
+using platform::windows::KeyboardHook;
+using platform::windows::SingleInstance;
+using platform::windows::TargetWindowToken;
+using platform::windows::TextInjector;
+using platform::windows::TrayIcon;
+using platform::windows::WasapiRecorder;
+
+constexpr int kShowHideHotkeyId = 1;
+
+[[nodiscard]] std::string uppercase_utf8(std::string_view value) {
+    if (value.empty()) {
+        return {};
+    }
+    const std::string input(value);
+    const int source_length = static_cast<int>(input.size());
+    const int wide_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input.data(), source_length, nullptr, 0);
+    if (wide_length <= 0) {
+        return {};
+    }
+    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input.data(), source_length, wide.data(), wide_length) != wide_length) {
+        return {};
+    }
+    (void)CharUpperBuffW(wide.data(), static_cast<DWORD>(wide.size()));
+    const int utf8_length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), static_cast<int>(wide.size()), nullptr, 0,
+                                                nullptr, nullptr);
+    if (utf8_length <= 0) {
+        return {};
+    }
+    std::string result(static_cast<std::size_t>(utf8_length), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), static_cast<int>(wide.size()), result.data(), utf8_length,
+                            nullptr, nullptr) != utf8_length) {
+        return {};
+    }
+    return result;
+}
+
+class Application {
+public:
+    explicit Application(HINSTANCE instance)
+        : instance_(instance), instance_guard_(L"Local\\AevocisNativeCppSingleton"), settings_(), window_(instance), overlay_(instance) {
+        settings_ = settings_store_.load();
+        toggle_mode_.store(settings_.toggle_mode);
+        history_store_.load();
+        terms_store_.load();
+    }
+
+    ~Application() {
+        if (icon_owned_ && icon_ != nullptr) {
+            (void)DestroyIcon(icon_);
+        }
+    }
+
+    int run() {
+        icon_ = load_icon();
+        window_.set_icon(icon_);
+        if (!instance_guard_.primary() || !window_.create()) {
+            return 0;
+        }
+        window_.set_message_handler([this](UINT message, WPARAM wparam, LPARAM lparam) {
+            return handle_message(message, wparam, lparam);
+        });
+        window_.set_theme_handler([this] {
+            settings_.theme = settings_.theme == 0 ? 1 : 0;
+            (void)settings_store_.save(settings_);
+        });
+        window_.set_trigger_mode_handler([this] {
+            const bool toggle = !toggle_mode_.load();
+            toggle_mode_.store(toggle);
+            settings_.toggle_mode = toggle;
+            (void)settings_store_.save(settings_);
+        });
+        window_.set_history_clear_handler([this] {
+            std::scoped_lock lock(history_mutex_);
+            if (history_store_.clear()) {
+                window_.clear_history();
+            }
+        });
+        window_.set_theme(settings_.theme == 1 ? ui::ThemeMode::DarkGlass : ui::ThemeMode::Paper);
+        window_.set_trigger_mode(settings_.toggle_mode);
+        for (const auto& record : history_store_.records()) {
+            window_.add_history(record.text);
+        }
+        (void)tray_.install(window_.handle(), platform::windows::kTrayMessage, icon_);
+        (void)overlay_.create();
+        (void)command_server_.start([this](std::string command) { return handle_command_request(std::move(command)); });
+        (void)show_hide_hotkey_.register_hotkey(window_.handle(), kShowHideHotkeyId, settings_.show_hide_modifiers,
+                                                 settings_.show_hide_virtual_key);
+        (void)keyboard_hook_.install(window_.handle(), platform::windows::kKeyboardMessage);
+        window_.show();
+        MSG message{};
+        while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        scheduler_.wait();
+        return static_cast<int>(message.wParam);
+    }
+
+private:
+    bool handle_message(UINT message, WPARAM wparam, LPARAM lparam) {
+        if (message == WM_HOTKEY && static_cast<int>(wparam) == kShowHideHotkeyId) {
+            window_.show_or_hide();
+            return true;
+        }
+        if (message == platform::windows::kKeyboardMessage) {
+            handle_keyboard(static_cast<UINT>(wparam), lparam != 0);
+            return true;
+        }
+        if (message == platform::windows::kStatusMessage) {
+            const auto state = static_cast<core::AppState>(wparam);
+            const auto error = static_cast<core::ErrorCode>(lparam);
+            if (error == core::ErrorCode::None) {
+                window_.set_state(state);
+            } else {
+                window_.set_error(error);
+            }
+            overlay_.set_state(state);
+            return true;
+        }
+        if (message == platform::windows::kUpdateQuitMessage) {
+            PostQuitMessage(0);
+            return true;
+        }
+        if (message == platform::windows::kHistoryMessage) {
+            std::deque<std::string> pending;
+            {
+                std::scoped_lock lock(history_mutex_);
+                pending.swap(pending_history_);
+            }
+            for (auto& text : pending) {
+                window_.add_history(std::move(text));
+            }
+            return true;
+        }
+        if (message == platform::windows::kCommandMessage) {
+            std::deque<std::string> commands;
+            {
+                std::scoped_lock lock(command_mutex_);
+                commands.swap(pending_commands_);
+            }
+            for (auto& command : commands) {
+                if (command == "show") {
+                    window_.show();
+                } else if (command == "theme") {
+                    window_.toggle_theme();
+                } else if (command.rfind("inject:", 0) == 0) {
+                    schedule_injection(command.substr(7));
+                }
+            }
+            return true;
+        }
+        if (message == platform::windows::kTrayMessage) {
+            const auto event = static_cast<UINT>(lparam);
+            if (event == WM_LBUTTONUP) {
+                window_.show_or_hide();
+            } else if (event == WM_RBUTTONUP) {
+                tray_.show_menu();
+            }
+            return true;
+        }
+        if (message == WM_COMMAND) {
+            switch (static_cast<UINT>(wparam)) {
+            case platform::windows::kCommandToggle:
+                window_.show_or_hide();
+                return true;
+            case platform::windows::kCommandTheme:
+                window_.toggle_theme();
+                return true;
+            case platform::windows::kCommandSettings:
+                window_.open_settings();
+                window_.show();
+                return true;
+            case platform::windows::kCommandAutostart: {
+                const bool enabled = platform::windows::Autostart::enabled();
+                const bool updated = platform::windows::Autostart::set_enabled(!enabled, executable_path());
+                if (updated) {
+                    settings_.autostart = !enabled;
+                    (void)settings_store_.save(settings_);
+                }
+                return true;
+            }
+            case platform::windows::kCommandUpdate:
+                platform::windows::UpdateManager::check_and_install_async(window_.handle(), std::wstring(kVersion), executable_path());
+                return true;
+            case platform::windows::kCommandQuit:
+                PostQuitMessage(0);
+                return true;
+            default:
+                break;
+            }
+        }
+        return false;
+    }
+
+    void handle_keyboard(UINT virtual_key, bool down) {
+        if (virtual_key != settings_.push_to_talk_virtual_key) {
+            return;
+        }
+        {
+            std::scoped_lock lock(input_mutex_);
+            key_down_ = down;
+            if (!down) {
+                input_cv_.notify_all();
+            }
+        }
+        if (down) {
+            if (toggle_mode_.load() && scheduler_.active()) {
+                std::scoped_lock lock(input_mutex_);
+                toggle_stop_ = true;
+                input_cv_.notify_all();
+                return;
+            }
+            if (!toggle_mode_.load() && scheduler_.active()) {
+                return;
+            }
+            const TargetWindowToken target = TargetWindowToken::capture();
+            if (!target.valid()) {
+                window_.set_error(core::ErrorCode::TargetChanged);
+                return;
+            }
+            {
+                std::scoped_lock lock(input_mutex_);
+                toggle_stop_ = false;
+                target_ = target;
+            }
+            if (!scheduler_.submit(target.core_token(), [this, target](std::stop_token stop, core::SessionId id) {
+                    run_session(stop, id, target);
+                })) {
+                window_.set_error(core::ErrorCode::Busy);
+            }
+        }
+    }
+
+    void run_session(std::stop_token stop, core::SessionId id, TargetWindowToken target) {
+        post_state(core::AppState::Starting);
+        if (!recorder_.start()) {
+            (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::AudioUnavailable);
+            post_error(core::ErrorCode::AudioUnavailable);
+            return;
+        }
+        (void)scheduler_.transition(id, core::AppState::Capturing);
+        post_state(core::AppState::Capturing);
+        {
+            std::unique_lock lock(input_mutex_);
+            input_cv_.wait(lock, [this, &stop] {
+                return stop.stop_requested() || (toggle_mode_.load() ? toggle_stop_ : !key_down_);
+            });
+        }
+        const platform::windows::RecordedAudio audio = recorder_.stop();
+        if (stop.stop_requested()) {
+            (void)scheduler_.transition(id, core::AppState::Cancelled, core::ErrorCode::Cancelled);
+            post_state(core::AppState::Cancelled);
+            return;
+        }
+        (void)scheduler_.transition(id, core::AppState::Recognizing);
+        post_state(core::AppState::Recognizing);
+        if (!recognizer_.ready() && !recognizer_.load(model_directory())) {
+            (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::RecognitionUnavailable);
+            post_error(core::ErrorCode::RecognitionUnavailable);
+            return;
+        }
+        const core::RecognitionResult result = recognizer_.recognize(audio.samples, audio.sample_rate, stop);
+        if (!result.ok()) {
+            (void)scheduler_.transition(id, core::AppState::Failed, result.error);
+            post_error(result.error);
+            return;
+        }
+        (void)scheduler_.transition(id, core::AppState::PostProcessing);
+        post_state(core::AppState::PostProcessing);
+        core::TextPipelineOptions options;
+        options.append_sentence_punctuation = settings_.punctuation;
+        const auto processed = core::TextPipeline::process(result.text, terms_store_.terms(), options);
+        if (processed.text.empty() || !target.still_valid()) {
+            (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::TargetChanged);
+            post_error(core::ErrorCode::TargetChanged);
+            return;
+        }
+        if (const auto command = core::VoiceCommandMatcher::match(processed.text, voice_commands_); command.has_value()) {
+            run_voice_command(stop, id, target, *command, options);
+            return;
+        }
+        (void)scheduler_.transition(id, core::AppState::Injecting);
+        post_state(core::AppState::Injecting);
+        if (!injector_.inject(target, processed.text)) {
+            (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::InjectionFailed);
+            post_error(core::ErrorCode::InjectionFailed);
+            return;
+        }
+        remember_injection(target, processed.text);
+        queue_history(processed.text);
+        (void)scheduler_.transition(id, core::AppState::Idle);
+        post_state(core::AppState::Idle);
+    }
+
+    void run_voice_command(std::stop_token stop, core::SessionId id, const TargetWindowToken& target,
+                           const core::CommandMatch& command, const core::TextPipelineOptions& options) {
+        if (stop.stop_requested()) {
+            (void)scheduler_.transition(id, core::AppState::Cancelled, core::ErrorCode::Cancelled);
+            post_state(core::AppState::Cancelled);
+            return;
+        }
+        if (command.action == core::VoiceCommandAction::Cancel) {
+            TargetWindowToken previous_target;
+            std::size_t previous_length = 0;
+            {
+                std::scoped_lock lock(last_injection_mutex_);
+                previous_target = last_injection_target_;
+                previous_length = last_injected_length_;
+                last_injected_length_ = 0;
+            }
+            const bool undone = previous_length == 0 ||
+                                (previous_target.still_valid() && injector_.send_virtual_key(previous_target, VK_BACK, previous_length));
+            (void)scheduler_.transition(id, undone ? core::AppState::Cancelled : core::AppState::Failed,
+                                        undone ? core::ErrorCode::Cancelled : core::ErrorCode::InjectionFailed);
+            if (undone) {
+                post_state(core::AppState::Cancelled);
+                post_state(core::AppState::Idle);
+            } else {
+                post_error(core::ErrorCode::InjectionFailed);
+            }
+            return;
+        }
+        (void)scheduler_.transition(id, core::AppState::Injecting);
+        post_state(core::AppState::Injecting);
+        if (command.action == core::VoiceCommandAction::SendEnter) {
+            if (injector_.send_virtual_key(target, VK_RETURN)) {
+                remember_injection(target, "\n");
+                (void)scheduler_.transition(id, core::AppState::Idle);
+                post_state(core::AppState::Idle);
+            } else {
+                (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::InjectionFailed);
+                post_error(core::ErrorCode::InjectionFailed);
+            }
+            return;
+        }
+        const auto remainder = core::TextPipeline::process(command.remaining_text, terms_store_.terms(), options);
+        const std::string upper = uppercase_utf8(remainder.text);
+        if (upper.empty() || !injector_.inject(target, upper)) {
+            (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::InjectionFailed);
+            post_error(core::ErrorCode::InjectionFailed);
+            return;
+        }
+        remember_injection(target, upper);
+        queue_history(upper);
+        (void)scheduler_.transition(id, core::AppState::Idle);
+        post_state(core::AppState::Idle);
+    }
+
+    void remember_injection(const TargetWindowToken& target, std::string_view text) {
+        std::scoped_lock lock(last_injection_mutex_);
+        last_injection_target_ = target;
+        last_injected_length_ = TextInjector::utf16_length(text);
+    }
+
+    void post_state(core::AppState state) const noexcept {
+        (void)PostMessageW(window_.handle(), platform::windows::kStatusMessage, static_cast<WPARAM>(state),
+                            static_cast<LPARAM>(core::ErrorCode::None));
+    }
+
+    void post_error(core::ErrorCode error) const noexcept {
+        (void)PostMessageW(window_.handle(), platform::windows::kStatusMessage, static_cast<WPARAM>(core::AppState::Failed),
+                            static_cast<LPARAM>(error));
+    }
+
+    void queue_history(std::string text) {
+        std::scoped_lock lock(history_mutex_);
+        pending_history_.push_back(text);
+        (void)history_store_.add(std::move(text), settings_.history_retention_days);
+        (void)PostMessageW(window_.handle(), platform::windows::kHistoryMessage, 0, 0);
+    }
+
+    void schedule_injection(std::string text) {
+        if (text.empty() || scheduler_.active()) {
+            return;
+        }
+        const TargetWindowToken target = TargetWindowToken::capture();
+        if (!target.valid()) {
+            post_error(core::ErrorCode::TargetChanged);
+            return;
+        }
+        if (!scheduler_.submit(target.core_token(), [this, target, text = std::move(text)](std::stop_token stop, core::SessionId id) {
+                post_state(core::AppState::Injecting);
+                if (stop.stop_requested() || !injector_.inject(target, text)) {
+                    (void)scheduler_.transition(id, core::AppState::Failed, core::ErrorCode::InjectionFailed);
+                    post_error(core::ErrorCode::InjectionFailed);
+                    return;
+                }
+                queue_history(text);
+                (void)scheduler_.transition(id, core::AppState::Idle);
+                post_state(core::AppState::Idle);
+            })) {
+            post_error(core::ErrorCode::Busy);
+        }
+    }
+
+    [[nodiscard]] std::string handle_command_request(std::string command) {
+        if (command == "status") {
+            return "{\"running\":true}\n";
+        }
+        if (command != "show" && command != "theme" && command.rfind("inject:", 0) != 0) {
+            return "{\"accepted\":false,\"error\":\"unknown_command\"}\n";
+        }
+        if (command.rfind("inject:", 0) == 0 && scheduler_.active()) {
+            return "{\"accepted\":false,\"error\":\"busy\"}\n";
+        }
+        {
+            std::scoped_lock lock(command_mutex_);
+            pending_commands_.push_back(std::move(command));
+        }
+        (void)PostMessageW(window_.handle(), platform::windows::kCommandMessage, 0, 0);
+        return "{\"accepted\":true}\n";
+    }
+
+    [[nodiscard]] std::string model_directory() const {
+        const auto executable = executable_path();
+        if (executable.empty()) {
+            return {};
+        }
+        return (std::filesystem::path(executable).parent_path() / L"Models" / L"sensevoice").string();
+    }
+
+    [[nodiscard]] std::wstring executable_path() const {
+        wchar_t executable[MAX_PATH]{};
+        const DWORD length = GetModuleFileNameW(instance_, executable, ARRAYSIZE(executable));
+        if (length == 0 || length >= ARRAYSIZE(executable)) {
+            return {};
+        }
+        return std::filesystem::path(executable).wstring();
+    }
+
+    [[nodiscard]] HICON load_icon() noexcept {
+        const std::wstring executable = executable_path();
+        if (!executable.empty()) {
+            const auto path = std::filesystem::path(executable).parent_path() / L"Aevocis.ico";
+            HICON icon = static_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));
+            if (icon != nullptr) {
+                icon_owned_ = true;
+                return icon;
+            }
+        }
+        return LoadIconW(nullptr, IDI_APPLICATION);
+    }
+
+    HINSTANCE instance_{};
+    HICON icon_{};
+    bool icon_owned_{false};
+    SingleInstance instance_guard_;
+    platform::windows::SettingsStore settings_store_;
+    platform::windows::AppSettings settings_;
+    platform::windows::HistoryStore history_store_;
+    platform::windows::TermDictionaryStore terms_store_;
+    ui::MainWindow window_;
+    ui::RecordingOverlay overlay_;
+    TrayIcon tray_;
+    GlobalHotkey show_hide_hotkey_;
+    KeyboardHook keyboard_hook_;
+    core::SingleTaskScheduler scheduler_;
+    WasapiRecorder recorder_;
+    platform::windows::SenseVoiceRecognizer recognizer_;
+    std::vector<core::VoiceCommand> voice_commands_ = core::VoiceCommandMatcher::defaults();
+    platform::windows::CommandPipeServer command_server_;
+    TextInjector injector_;
+    std::mutex input_mutex_;
+    std::condition_variable input_cv_;
+    mutable std::mutex history_mutex_;
+    std::deque<std::string> pending_history_;
+    std::mutex command_mutex_;
+    std::deque<std::string> pending_commands_;
+    TargetWindowToken target_{};
+    bool key_down_{false};
+    bool toggle_stop_{false};
+    std::atomic_bool toggle_mode_{false};
+    std::mutex last_injection_mutex_;
+    TargetWindowToken last_injection_target_{};
+    std::size_t last_injected_length_{0};
+};
+
+}  // namespace
+
+namespace {
+
+[[nodiscard]] std::string utf8_from_wide(const wchar_t* value) {
+    if (value == nullptr || *value == L'\0') return {};
+    const int source_length = static_cast<int>(wcslen(value));
+    const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, source_length, nullptr, 0, nullptr, nullptr);
+    if (length <= 0) return {};
+    std::string result(static_cast<std::size_t>(length), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, source_length, result.data(), length, nullptr, nullptr) != length) return {};
+    return result;
+}
+
+int run_command_line(PWSTR command_line) {
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(command_line, &argc);
+    if (argv == nullptr || argc < 2) {
+        if (argv != nullptr) LocalFree(static_cast<HLOCAL>(argv));
+        return -1;
+    }
+    std::string command;
+    if (std::wstring_view(argv[1]) == L"--status") {
+        command = "status";
+    } else if (std::wstring_view(argv[1]) == L"--show") {
+        command = "show";
+    } else if (std::wstring_view(argv[1]) == L"--theme") {
+        command = "theme";
+    } else if (std::wstring_view(argv[1]) == L"--inject" && argc >= 3) {
+        command = "inject:" + utf8_from_wide(argv[2]);
+    } else {
+        LocalFree(static_cast<HLOCAL>(argv));
+        return 2;
+    }
+    const std::string response = aevocis::platform::windows::CommandPipeClient::request(command);
+    LocalFree(static_cast<HLOCAL>(argv));
+    const auto write_output = [](std::string_view value) {
+        HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (output == nullptr || output == INVALID_HANDLE_VALUE) {
+            (void)AttachConsole(ATTACH_PARENT_PROCESS);
+            output = GetStdHandle(STD_OUTPUT_HANDLE);
+        }
+        if (output != nullptr && output != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            (void)WriteFile(output, value.data(), static_cast<DWORD>(value.size()), &written, nullptr);
+        }
+    };
+    if (response.empty()) {
+        const char unavailable[] = "{\"running\":false}\n";
+        write_output(unavailable);
+        return command == "status" ? 0 : 1;
+    }
+    write_output(response);
+    return response.find("\"accepted\":true") != std::string::npos || response.find("\"running\":true") != std::string::npos ? 0 : 1;
+}
+
+}  // namespace
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int) {
+    const int command_result = run_command_line(command_line);
+    if (command_result >= 0) return command_result;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    aevocis::platform::windows::CrashReporter::install();
+    Application application(instance);
+    return application.run();
+}
