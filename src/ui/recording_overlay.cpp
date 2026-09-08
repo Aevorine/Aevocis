@@ -314,7 +314,8 @@ void RecordingOverlay::render_content(ID2D1RenderTarget* target) noexcept {
         target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(pill.left + 30.0F, dot_cy), 6.0F, 6.0F), brush.Get());
     }
 
-    draw_text(target, write_factory_.Get(), state_label(state_), D2D1::RectF(58, 20, 280, 52), 16.0F,
+    draw_text(target, write_factory_.Get(), state_label(state_),
+             D2D1::RectF(pill.left + 52.0F, pill.top + 14.0F, pill.left + 280.0F, pill.top + 46.0F), 16.0F,
              D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, opacity_), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     if (state_ == core::AppState::Capturing) {
@@ -335,7 +336,8 @@ void RecordingOverlay::render_content(ID2D1RenderTarget* target) noexcept {
         const unsigned int total_seconds = static_cast<unsigned int>(elapsed_ms / 1000);
         wchar_t timer_text[16]{};
         (void)swprintf(timer_text, ARRAYSIZE(timer_text), L"%u:%02u", total_seconds / 60, total_seconds % 60);
-        draw_text(target, write_factory_.Get(), timer_text, D2D1::RectF(pill.right - 60.0F, 20, pill.right - 12.0F, 52), 15.0F,
+        draw_text(target, write_factory_.Get(), timer_text,
+                 D2D1::RectF(pill.right - 60.0F, pill.top + 14.0F, pill.right - 12.0F, pill.top + 46.0F), 15.0F,
                  D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, opacity_), DWRITE_FONT_WEIGHT_NORMAL);
     }
 }
