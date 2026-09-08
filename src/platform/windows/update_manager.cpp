@@ -209,63 +209,109 @@ struct UpdateAsset {
     return result;
 }
 
-[[nodiscard]] bool download_asset(std::string_view url, const std::filesystem::path& destination) noexcept {
-    constexpr std::string_view prefix = "https://github.com/Aevorine/Aevocis";
-    if (url.rfind(prefix, 0) != 0) {
+// GitHub's release asset URLs (github.com/.../releases/download/...) 302-redirect to a
+// signed, time-limited objects.githubusercontent.com URL. WinHTTP follows same-scheme redirects
+// automatically by default, but the previous version of this function never checked the response
+// status code -- if anything along the way returned something other than a clean 200 (a 3xx this
+// particular WinHTTP session configuration didn't chase, an interstitial error page, etc.), it
+// silently wrote THAT body to disk and let the caller's sha256 check fail with "校验失败", which is
+// exactly the symptom this fixes. WinHttpCrackUrl + an explicit bounded redirect loop makes each
+// hop and its status code visible and handled on its own terms instead of assumed.
+[[nodiscard]] bool download_asset(std::string_view initial_url, const std::filesystem::path& destination) noexcept {
+    constexpr std::string_view trusted_prefix = "https://github.com/Aevorine/Aevocis";
+    if (initial_url.rfind(trusted_prefix, 0) != 0) {
         return false;
     }
-    const std::wstring path = ascii_to_wide(url.substr(prefix.size()));
-    HINTERNET session = WinHttpOpen(L"Aevocis/0.2.2", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
-                                    WINHTTP_NO_PROXY_BYPASS, 0);
-    if (session == nullptr) return false;
-    (void)WinHttpSetTimeouts(session, 3000, 3000, 15000, 15000);
-    HINTERNET connection = WinHttpConnect(session, L"github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
-    HINTERNET request = connection != nullptr
-                            ? WinHttpOpenRequest(connection, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                                 WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
-                            : nullptr;
-    const bool sent = request != nullptr && WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                                               WINHTTP_NO_REQUEST_DATA, 0, 0, 0) != FALSE &&
-                      WinHttpReceiveResponse(request, nullptr) != FALSE;
-    if (!sent) {
-        if (request != nullptr) WinHttpCloseHandle(request);
-        if (connection != nullptr) WinHttpCloseHandle(connection);
-        WinHttpCloseHandle(session);
-        return false;
-    }
-    const auto temporary = destination.parent_path() / (destination.filename().wstring() + L".download");
-    std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-    if (!stream) {
+    std::wstring current_url = ascii_to_wide(initial_url);
+    for (int hop = 0; hop < 5; ++hop) {
+        URL_COMPONENTS components{};
+        components.dwStructSize = sizeof(components);
+        wchar_t host[256]{};
+        wchar_t path[2048]{};
+        components.lpszHostName = host;
+        components.dwHostNameLength = ARRAYSIZE(host);
+        components.lpszUrlPath = path;
+        components.dwUrlPathLength = ARRAYSIZE(path);
+        if (WinHttpCrackUrl(current_url.c_str(), static_cast<DWORD>(current_url.size()), 0, &components) == FALSE ||
+            components.nScheme != INTERNET_SCHEME_HTTPS) {
+            return false;
+        }
+        HINTERNET session = WinHttpOpen(L"Aevocis-Updater/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+                                        WINHTTP_NO_PROXY_BYPASS, 0);
+        if (session == nullptr) return false;
+        (void)WinHttpSetTimeouts(session, 5000, 5000, 20000, 20000);
+        HINTERNET connection = WinHttpConnect(session, host, components.nPort, 0);
+        HINTERNET request = connection != nullptr
+                                ? WinHttpOpenRequest(connection, L"GET", path, nullptr, WINHTTP_NO_REFERER,
+                                                     WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
+                                : nullptr;
+        const bool sent = request != nullptr &&
+                          WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) != FALSE &&
+                          WinHttpReceiveResponse(request, nullptr) != FALSE;
+        if (!sent) {
+            if (request != nullptr) WinHttpCloseHandle(request);
+            if (connection != nullptr) WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            return false;
+        }
+        DWORD status = 0;
+        DWORD status_size = sizeof(status);
+        (void)WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+                                  &status, &status_size, WINHTTP_NO_HEADER_INDEX);
+        if (status >= 300 && status < 400) {
+            wchar_t location[2048]{};
+            DWORD location_size = sizeof(location);
+            const bool has_location = WinHttpQueryHeaders(request, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, location,
+                                                           &location_size, WINHTTP_NO_HEADER_INDEX) != FALSE &&
+                                      location[0] != L'\0';
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            if (!has_location) return false;
+            current_url = location;
+            continue;
+        }
+        if (status != 200) {
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            return false;
+        }
+        const auto temporary = destination.parent_path() / (destination.filename().wstring() + L".download");
+        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+        if (!stream) {
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            return false;
+        }
+        bool success = true;
+        for (;;) {
+            DWORD available = 0;
+            if (WinHttpQueryDataAvailable(request, &available) == FALSE || available == 0) break;
+            std::vector<char> buffer(available);
+            DWORD read = 0;
+            if (WinHttpReadData(request, buffer.data(), available, &read) == FALSE) {
+                success = false;
+                break;
+            }
+            stream.write(buffer.data(), static_cast<std::streamsize>(read));
+            if (!stream) {
+                success = false;
+                break;
+            }
+        }
+        stream.close();
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connection);
         WinHttpCloseHandle(session);
-        return false;
-    }
-    bool success = true;
-    for (;;) {
-        DWORD available = 0;
-        if (WinHttpQueryDataAvailable(request, &available) == FALSE || available == 0) break;
-        std::vector<char> buffer(available);
-        DWORD read = 0;
-        if (WinHttpReadData(request, buffer.data(), available, &read) == FALSE) {
-            success = false;
-            break;
+        if (!success || !MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            (void)DeleteFileW(temporary.c_str());
+            return false;
         }
-        stream.write(buffer.data(), static_cast<std::streamsize>(read));
-        if (!stream) {
-            success = false;
-            break;
-        }
+        return true;
     }
-    stream.close();
-    WinHttpCloseHandle(request);
-    WinHttpCloseHandle(connection);
-    WinHttpCloseHandle(session);
-    if (!success || !MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        (void)DeleteFileW(temporary.c_str());
-        return false;
-    }
-    return true;
+    return false;
 }
 
 [[nodiscard]] int version_number(std::string_view value) noexcept {

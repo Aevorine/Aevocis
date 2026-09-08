@@ -23,7 +23,13 @@ namespace {
 constexpr wchar_t kClassName[] = L"AevocisNativeCppWindow";
 constexpr int kWidth = 440;
 constexpr int kHeight = 680;
-constexpr UINT_PTR kAnimTimerId = 1;
+// Must not collide with Application::kIdleTimerId (also 1, also SetTimer'd on this same HWND
+// from main.cpp) -- a shared id on the same window means the later SetTimer call silently
+// overrides the earlier one's interval, and Application::handle_message's WM_TIMER branch (which
+// runs first, via message_handler_, before MainWindow's own switch) swallows every WM_TIMER for
+// id 1 by returning true, so this window's own fade-in tick would never run and opacity_ would
+// stay at 0 forever -- a permanently blank window, not a startup race.
+constexpr UINT_PTR kAnimTimerId = 401;
 constexpr UINT kAnimIntervalMs = 33;
 constexpr int kSearchEditId = 501;
 constexpr float kCardHeight = 66.0F;
@@ -241,13 +247,15 @@ void MainWindow::show_or_hide() noexcept {
 }
 
 void MainWindow::show() noexcept {
-    ShowWindow(hwnd_, SW_SHOWNORMAL);
-    SetForegroundWindow(hwnd_);
-    (void)UpdateWindow(hwnd_);
     if (composition_ready_) {
         opacity_ = 0.0F;
         target_opacity_ = 1.0F;
         surface_.set_opacity(0.0F);
+    }
+    ShowWindow(hwnd_, SW_SHOWNORMAL);
+    SetForegroundWindow(hwnd_);
+    (void)UpdateWindow(hwnd_);
+    if (composition_ready_) {
         SetTimer(hwnd_, kAnimTimerId, kAnimIntervalMs, nullptr);
     }
 }
