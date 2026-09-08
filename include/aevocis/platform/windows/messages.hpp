@@ -17,5 +17,6 @@ constexpr UINT kCommandQuit = 41004;
 constexpr UINT kCommandAutostart = 41005;
 constexpr UINT kCommandUpdate = 41006;
 constexpr UINT kUpdateQuitMessage = WM_APP + 7;
+constexpr UINT kPartialTextMessage = WM_APP + 8;
 
 }  // namespace aevocis::platform::windows

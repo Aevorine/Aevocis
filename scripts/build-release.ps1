@@ -65,7 +65,7 @@ try {
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
         '{0}  {1}' -f $hash, $file.FullName.Substring($portableDir.Length + 1)
     }
-    Set-Content -LiteralPath $manifest -Value $lines -Encoding utf8NoBOM
+    [System.IO.File]::WriteAllLines($manifest, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
 
     if (-not $SkipInstaller) {
         if (-not $iscc -or -not (Test-Path -LiteralPath $iscc)) { throw 'Inno Setup compiler not found.' }

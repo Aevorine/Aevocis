@@ -145,6 +145,24 @@ bool WasapiRecorder::running() const noexcept {
     return running_;
 }
 
+std::size_t WasapiRecorder::sample_count() const noexcept {
+    std::scoped_lock lock(mutex_);
+    return samples_.size();
+}
+
+std::uint32_t WasapiRecorder::current_sample_rate() const noexcept {
+    std::scoped_lock lock(mutex_);
+    return sample_rate_;
+}
+
+std::vector<float> WasapiRecorder::copy_since(std::size_t offset) const noexcept {
+    std::scoped_lock lock(mutex_);
+    if (offset >= samples_.size()) {
+        return {};
+    }
+    return std::vector<float>(samples_.begin() + static_cast<std::ptrdiff_t>(offset), samples_.end());
+}
+
 void WasapiRecorder::capture_loop(std::stop_token stop) noexcept {
     if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {
         return;

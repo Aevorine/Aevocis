@@ -21,7 +21,7 @@ struct AppSettings {
     bool draft_confirmation{false};
     bool autostart{false};
     std::uint32_t history_retention_days{30};
-    int theme{0};
+    int theme{1};
     // F1: empty (the default) means the hook is off -- text passes through unchanged. Only
     // takes effect once the user explicitly types a path in here.
     std::wstring external_pipeline_path;

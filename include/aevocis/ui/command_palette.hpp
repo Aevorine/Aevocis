@@ -39,11 +39,14 @@ private:
     void refresh_filter() noexcept;
     void activate_selected() noexcept;
     void close() noexcept;
+    void draw_item(const DRAWITEMSTRUCT& item) const noexcept;
 
     HINSTANCE instance_{};
     HWND hwnd_{};
     HWND edit_{};
     HWND list_{};
+    HFONT font_{};
+    HBRUSH background_brush_{};
     std::vector<PaletteCommand> commands_;
     std::vector<std::size_t> filtered_indices_;
 };

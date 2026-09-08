@@ -128,6 +128,7 @@ public:
         window_.set_theme_handler([this] {
             settings_.theme = settings_.theme == 0 ? 1 : 0;
             (void)settings_store_.save(settings_);
+            overlay_.set_theme(window_.theme());
         });
         window_.set_trigger_mode_handler([this] {
             const bool toggle = !toggle_mode_.load();
@@ -144,11 +145,12 @@ public:
         window_.set_theme(settings_.theme == 1 ? ui::ThemeMode::DarkGlass : ui::ThemeMode::Paper);
         window_.set_trigger_mode(settings_.toggle_mode);
         for (const auto& record : history_store_.records()) {
-            window_.add_history(record.text);
+            window_.add_history(record.text, record.epoch_seconds);
         }
         window_.set_stats(compute_stats());
         (void)tray_.install(window_.handle(), platform::windows::kTrayMessage, icon_);
         (void)overlay_.create();
+        overlay_.set_theme(window_.theme());
         (void)command_server_.start([this](std::string command) { return handle_command_request(std::move(command)); });
         (void)show_hide_hotkey_.register_hotkey(window_.handle(), kShowHideHotkeyId, settings_.show_hide_modifiers,
                                                  settings_.show_hide_virtual_key);
@@ -213,14 +215,28 @@ private:
             PostQuitMessage(0);
             return true;
         }
+        if (message == platform::windows::kPartialTextMessage) {
+            std::wstring text;
+            {
+                std::scoped_lock lock(partial_mutex_);
+                text = pending_partial_text_;
+            }
+            overlay_.set_partial_text(std::move(text));
+            return true;
+        }
         if (message == platform::windows::kHistoryMessage) {
-            std::deque<std::string> pending;
+            std::vector<platform::windows::HistoryRecord> fresh;
             {
                 std::scoped_lock lock(history_mutex_);
-                pending.swap(pending_history_);
+                const auto& records = history_store_.records();
+                const std::size_t count = pending_history_count_ > records.size() ? records.size() : pending_history_count_;
+                fresh.assign(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(count));
+                pending_history_count_ = 0;
             }
-            for (auto& text : pending) {
-                window_.add_history(std::move(text));
+            // fresh is newest-first; walk it oldest-of-the-batch-to-newest so MainWindow's own
+            // front-insert ends up in the same newest-first order.
+            for (auto it = fresh.rbegin(); it != fresh.rend(); ++it) {
+                window_.add_history(it->text, it->epoch_seconds);
             }
             window_.set_stats(compute_stats());
             return true;
@@ -335,10 +351,20 @@ private:
         (void)scheduler_.transition(id, core::AppState::Capturing);
         post_state(core::AppState::Capturing);
         {
-            std::unique_lock lock(input_mutex_);
-            input_cv_.wait(lock, [this, &stop] {
+            partial_offset_ = 0;
+            partial_transcript_.clear();
+            const auto stop_requested = [this, &stop] {
                 return stop.stop_requested() || (toggle_mode_.load() ? toggle_stop_ : !key_down_);
-            });
+            };
+            for (;;) {
+                std::unique_lock lock(input_mutex_);
+                const bool done = input_cv_.wait_for(lock, std::chrono::milliseconds(1200), stop_requested);
+                lock.unlock();
+                if (done) {
+                    break;
+                }
+                emit_partial_tick(stop);
+            }
         }
         platform::windows::RecordedAudio audio = recorder_.stop();
         if (stop.stop_requested()) {
@@ -480,6 +506,55 @@ private:
         last_injected_length_ = TextInjector::utf16_length(text);
     }
 
+    // Live-preview pass: runs on the same worker thread as run_session(), between wait_for()
+    // wake-ups, so it never races the final full-buffer recognition that happens after the loop
+    // exits. Only previews once the model is already warm (recognizer_.ready()) -- forcing a
+    // multi-second cold load just to preview would stall the very recording it's trying to show.
+    // Each tick decodes only the audio captured since the last tick (bounded, constant-ish cost
+    // regardless of how long the dictation has run so far) and appends it to a running caption;
+    // this text is advisory only -- it never feeds the authoritative recognition/injection path.
+    void emit_partial_tick(std::stop_token stop) {
+        if (stop.stop_requested() || !recognizer_.ready()) {
+            return;
+        }
+        const std::uint32_t rate = recorder_.current_sample_rate();
+        if (rate == 0) {
+            return;
+        }
+        const std::size_t total = recorder_.sample_count();
+        if (total <= partial_offset_) {
+            return;
+        }
+        const double new_seconds = static_cast<double>(total - partial_offset_) / static_cast<double>(rate);
+        if (new_seconds < 0.9) {
+            return;
+        }
+        std::vector<float> segment = recorder_.copy_since(partial_offset_);
+        partial_offset_ = total;
+        if (segment.empty() || !core::AudioGate::should_recognize(segment, rate)) {
+            return;
+        }
+        const core::RecognitionResult result = recognizer_.recognize(segment, rate, stop);
+        if (!result.ok() || result.text.empty()) {
+            return;
+        }
+        const int length = MultiByteToWideChar(CP_UTF8, 0, result.text.data(), static_cast<int>(result.text.size()), nullptr, 0);
+        if (length <= 0) {
+            return;
+        }
+        std::wstring wide(static_cast<std::size_t>(length), L'\0');
+        (void)MultiByteToWideChar(CP_UTF8, 0, result.text.data(), static_cast<int>(result.text.size()), wide.data(), length);
+        if (!partial_transcript_.empty()) {
+            partial_transcript_ += L' ';
+        }
+        partial_transcript_ += wide;
+        {
+            std::scoped_lock lock(partial_mutex_);
+            pending_partial_text_ = partial_transcript_;
+        }
+        (void)PostMessageW(window_.handle(), platform::windows::kPartialTextMessage, 0, 0);
+    }
+
     void post_state(core::AppState state) const noexcept {
         platform::windows::AppLog::record_state(state);
         (void)PostMessageW(window_.handle(), platform::windows::kStatusMessage, static_cast<WPARAM>(state),
@@ -494,7 +569,7 @@ private:
 
     void queue_history(std::string text) {
         std::scoped_lock lock(history_mutex_);
-        pending_history_.push_back(text);
+        ++pending_history_count_;
         (void)history_store_.add(std::move(text), settings_.history_retention_days);
         (void)PostMessageW(window_.handle(), platform::windows::kHistoryMessage, 0, 0);
     }
@@ -715,7 +790,11 @@ private:
     std::mutex input_mutex_;
     std::condition_variable input_cv_;
     mutable std::mutex history_mutex_;
-    std::deque<std::string> pending_history_;
+    std::size_t pending_history_count_{0};
+    std::size_t partial_offset_{0};
+    std::wstring partial_transcript_;
+    std::mutex partial_mutex_;
+    std::wstring pending_partial_text_;
     std::mutex command_mutex_;
     std::deque<std::string> pending_commands_;
     TargetWindowToken target_{};

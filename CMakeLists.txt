@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(AevocisNativeCpp VERSION 0.2.2 LANGUAGES CXX)
+project(AevocisNativeCpp VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,6 +29,7 @@ add_library(aevocis_windows STATIC
     src/platform/windows/app_log.cpp
     src/platform/windows/global_hotkey.cpp
     src/platform/windows/autostart.cpp
+    src/platform/windows/composition_host.cpp
     src/platform/windows/history_export.cpp
     src/platform/windows/command_pipe.cpp
     src/platform/windows/crash_reporter.cpp
@@ -45,6 +46,7 @@ add_library(aevocis_windows STATIC
     src/ui/command_palette.cpp
     src/ui/main_window.cpp
     src/ui/recording_overlay.cpp
+    src/ui/style.cpp
 )
 target_include_directories(aevocis_windows PUBLIC include)
 target_link_libraries(aevocis_windows PUBLIC
@@ -53,12 +55,17 @@ target_link_libraries(aevocis_windows PUBLIC
     bcrypt
     comctl32
     d2d1
+    d3d11
+    dcomp
+    dwmapi
     dwrite
+    dxgi
     ole32
     shlwapi
     shell32
     advapi32
     user32
+    uxtheme
     winhttp
     ksuser
 )

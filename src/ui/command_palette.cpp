@@ -1,6 +1,8 @@
 #include "aevocis/ui/command_palette.hpp"
 
 #include <commctrl.h>
+#include <dwmapi.h>
+#include <uxtheme.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -13,6 +15,11 @@ constexpr wchar_t kClassName[] = L"AevocisNativeCppCommandPalette";
 constexpr int kWidth = 420;
 constexpr int kHeight = 320;
 constexpr UINT_PTR kEditSubclassId = 1;
+constexpr COLORREF kBackground = RGB(0x1C, 0x1C, 0x1E);
+constexpr COLORREF kRow = RGB(0x24, 0x24, 0x26);
+constexpr COLORREF kSelected = RGB(0x2C, 0x2C, 0x2E);
+constexpr COLORREF kText = RGB(0xF5, 0xF5, 0xF7);
+constexpr COLORREF kAccent = RGB(0x5F, 0xD9, 0xC3);
 
 [[nodiscard]] bool contains_case_insensitive(std::wstring_view haystack, std::wstring_view needle) noexcept {
     if (needle.empty()) {
@@ -32,6 +39,12 @@ CommandPalette::~CommandPalette() {
     if (hwnd_ != nullptr) {
         DestroyWindow(hwnd_);
     }
+    if (font_ != nullptr) {
+        DeleteObject(font_);
+    }
+    if (background_brush_ != nullptr) {
+        DeleteObject(background_brush_);
+    }
 }
 
 void CommandPalette::set_commands(std::vector<PaletteCommand> commands) { commands_ = std::move(commands); }
@@ -44,13 +57,16 @@ void CommandPalette::toggle(HWND owner) noexcept {
         return;
     }
     if (hwnd_ == nullptr) {
+        if (background_brush_ == nullptr) {
+            background_brush_ = CreateSolidBrush(kBackground);
+        }
         WNDCLASSEXW window_class{};
         window_class.cbSize = sizeof(window_class);
         window_class.hInstance = instance_;
         window_class.lpfnWndProc = window_proc;
         window_class.lpszClassName = kClassName;
         window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        window_class.hbrBackground = background_brush_;
         if (RegisterClassExW(&window_class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
             return;
         }
@@ -63,6 +79,10 @@ void CommandPalette::toggle(HWND owner) noexcept {
         if (hwnd_ == nullptr) {
             return;
         }
+        const BOOL dark = TRUE;
+        (void)DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+        const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
+        (void)DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
         create_controls();
     }
     SetWindowTextW(edit_, L"");
@@ -79,14 +99,20 @@ void CommandPalette::close() noexcept {
 }
 
 void CommandPalette::create_controls() noexcept {
-    edit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 12, 12, kWidth - 24, 26,
-                            hwnd_, nullptr, instance_, nullptr);
-    list_ = CreateWindowExW(0, L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_NOTIFY | WS_VSCROLL, 12, 46,
-                            kWidth - 24, kHeight - 58, hwnd_, nullptr, instance_, nullptr);
+    edit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 14, 14, kWidth - 28, 28, hwnd_,
+                            nullptr, instance_, nullptr);
+    list_ = CreateWindowExW(0, L"LISTBOX", L"",
+                            WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL,
+                            14, 50, kWidth - 28, kHeight - 64, hwnd_, nullptr, instance_, nullptr);
     (void)SetWindowSubclass(edit_, edit_subclass_proc, kEditSubclassId, reinterpret_cast<DWORD_PTR>(this));
-    HFONT font = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    SendMessageW(edit_, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    SendMessageW(list_, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    (void)SetWindowTheme(list_, L"DarkMode_Explorer", nullptr);
+    if (font_ == nullptr) {
+        font_ = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    }
+    SendMessageW(edit_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    SendMessageW(list_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    (void)SendMessageW(list_, LB_SETITEMHEIGHT, 0, 30);
 }
 
 void CommandPalette::refresh_filter() noexcept {
@@ -103,6 +129,32 @@ void CommandPalette::refresh_filter() noexcept {
     }
     if (!filtered_indices_.empty()) {
         SendMessageW(list_, LB_SETCURSEL, 0, 0);
+    }
+}
+
+void CommandPalette::draw_item(const DRAWITEMSTRUCT& item) const noexcept {
+    if (item.itemID == static_cast<UINT>(-1)) {
+        return;
+    }
+    const bool selected = (item.itemState & ODS_SELECTED) != 0;
+    HBRUSH row_brush = CreateSolidBrush(selected ? kSelected : kRow);
+    FillRect(item.hDC, &item.rcItem, row_brush);
+    DeleteObject(row_brush);
+    if (selected) {
+        HBRUSH accent_brush = CreateSolidBrush(kAccent);
+        RECT stripe = item.rcItem;
+        stripe.right = stripe.left + 3;
+        FillRect(item.hDC, &stripe, accent_brush);
+        DeleteObject(accent_brush);
+    }
+    wchar_t text[256]{};
+    const LRESULT length = SendMessageW(item.hwndItem, LB_GETTEXT, item.itemID, reinterpret_cast<LPARAM>(text));
+    if (length != LB_ERR) {
+        RECT text_rect = item.rcItem;
+        text_rect.left += 16;
+        SetBkMode(item.hDC, TRANSPARENT);
+        SetTextColor(item.hDC, kText);
+        DrawTextW(item.hDC, text, -1, &text_rect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
     }
 }
 
@@ -160,6 +212,29 @@ LRESULT CALLBACK CommandPalette::window_proc(HWND hwnd, UINT message, WPARAM wpa
 
 LRESULT CommandPalette::handle_message(UINT message, WPARAM wparam, LPARAM lparam) noexcept {
     switch (message) {
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX: {
+        HDC dc = reinterpret_cast<HDC>(wparam);
+        SetTextColor(dc, kText);
+        SetBkColor(dc, kBackground);
+        SetBkMode(dc, OPAQUE);
+        return reinterpret_cast<LRESULT>(background_brush_);
+    }
+    case WM_MEASUREITEM: {
+        auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
+        if (measure != nullptr) {
+            measure->itemHeight = 30;
+        }
+        return TRUE;
+    }
+    case WM_DRAWITEM: {
+        const auto* item = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+        if (item != nullptr && item->CtlID == 0 && item->hwndItem == list_) {
+            draw_item(*item);
+            return TRUE;
+        }
+        break;
+    }
     case WM_COMMAND:
         if (reinterpret_cast<HWND>(lparam) == edit_ && HIWORD(wparam) == EN_CHANGE) {
             refresh_filter();

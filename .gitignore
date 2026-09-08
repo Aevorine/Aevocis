@@ -4,6 +4,7 @@
 /logs/
 /crash-dumps/
 /.claude/
+/.lavish/
 /Models/
 *.user
 *.suo

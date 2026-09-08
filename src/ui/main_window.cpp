@@ -4,80 +4,114 @@
 
 #include <commctrl.h>
 #include <d2d1.h>
+#include <dwmapi.h>
 #include <dwrite.h>
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cmath>
+#include <ctime>
+#include <cwctype>
 #include <string>
 
 namespace aevocis::ui {
 
 using Microsoft::WRL::ComPtr;
-using aevocis::platform::windows::kCommandSettings;
-using aevocis::platform::windows::kCommandTheme;
 
 namespace {
 
 constexpr wchar_t kClassName[] = L"AevocisNativeCppWindow";
-constexpr int kWidth = 680;
-constexpr int kHeight = 480;
+constexpr int kWidth = 440;
+constexpr int kHeight = 680;
+constexpr UINT_PTR kAnimTimerId = 1;
+constexpr UINT kAnimIntervalMs = 33;
+constexpr int kSearchEditId = 501;
+constexpr float kCardHeight = 66.0F;
+constexpr float kCardGap = 10.0F;
 
-struct Colors {
-    D2D1_COLOR_F background;
-    D2D1_COLOR_F surface;
-    D2D1_COLOR_F ink;
-    D2D1_COLOR_F muted;
-    D2D1_COLOR_F accent;
-    D2D1_COLOR_F border;
+struct Layout {
+    D2D1_RECT_F status_row;
+    D2D1_RECT_F theme_button;
+    D2D1_RECT_F settings_button;
+    D2D1_RECT_F search_pill;
+    D2D1_RECT_F history_area;
+    D2D1_ELLIPSE record_button;
+    D2D1_RECT_F hint_text;
+    D2D1_RECT_F clear_all_button;
+    D2D1_RECT_F back_button;
+    D2D1_RECT_F trigger_mode_card;
+    D2D1_RECT_F appearance_card;
+    D2D1_RECT_F stats_card;
 };
 
-[[nodiscard]] Colors colors(ThemeMode theme) noexcept {
-    switch (theme) {
-    case ThemeMode::DarkGlass:
-        return {D2D1::ColorF(0x10151D), D2D1::ColorF(0x17202B), D2D1::ColorF(0xF0F4F8), D2D1::ColorF(0x9BA9B8),
-                D2D1::ColorF(0x62D7C5), D2D1::ColorF(0x2D3A49)};
-    case ThemeMode::HighContrast:
-        // D1: WCAG-AA-level contrast (near-black ink on near-white surface, thick dark border)
-        // for users who specifically need maximum legibility over long-attention comfort.
-        return {D2D1::ColorF(0xFFFFFF), D2D1::ColorF(0xFFFFFF), D2D1::ColorF(0x000000), D2D1::ColorF(0x1A1A1A),
-                D2D1::ColorF(0x0047AB), D2D1::ColorF(0x000000)};
-    case ThemeMode::Sepia:
-        // D1: warm low-blue-light palette for long evening sessions.
-        return {D2D1::ColorF(0xEFE3CE), D2D1::ColorF(0xF7EEDD), D2D1::ColorF(0x4A3B28), D2D1::ColorF(0x8A7657),
-                D2D1::ColorF(0xB8763D), D2D1::ColorF(0xD9C7A3)};
-    case ThemeMode::Paper:
-    default:
-        return {D2D1::ColorF(0xF5F2EA), D2D1::ColorF(0xFFFDF8), D2D1::ColorF(0x29333D), D2D1::ColorF(0x77818A),
-                D2D1::ColorF(0x2A9D8F), D2D1::ColorF(0xDDD7CA)};
-    }
+[[nodiscard]] Layout compute_layout() noexcept {
+    constexpr float w = static_cast<float>(kWidth);
+    constexpr float h = static_cast<float>(kHeight);
+    Layout layout{};
+    layout.status_row = D2D1::RectF(20.0F, 12.0F, w - 100.0F, 52.0F);
+    layout.theme_button = D2D1::RectF(w - 92.0F, 12.0F, w - 52.0F, 52.0F);
+    layout.settings_button = D2D1::RectF(w - 44.0F, 12.0F, w - 4.0F, 52.0F);
+    layout.search_pill = D2D1::RectF(20.0F, 60.0F, w - 20.0F, 96.0F);
+    layout.history_area = D2D1::RectF(20.0F, 110.0F, w - 20.0F, h - 190.0F);
+    layout.record_button = D2D1::Ellipse(D2D1::Point2F(w / 2.0F, h - 140.0F), 38.0F, 38.0F);
+    layout.hint_text = D2D1::RectF(20.0F, h - 46.0F, w - 140.0F, h - 16.0F);
+    layout.clear_all_button = D2D1::RectF(w - 96.0F, h - 46.0F, w - 20.0F, h - 16.0F);
+    layout.back_button = D2D1::RectF(16.0F, 12.0F, 92.0F, 52.0F);
+    layout.trigger_mode_card = D2D1::RectF(20.0F, 70.0F, w - 20.0F, 150.0F);
+    layout.appearance_card = D2D1::RectF(20.0F, 166.0F, w - 20.0F, 246.0F);
+    layout.stats_card = D2D1::RectF(20.0F, 262.0F, w - 20.0F, 384.0F);
+    return layout;
 }
 
-[[nodiscard]] const wchar_t* theme_name(ThemeMode theme) noexcept {
-    switch (theme) {
-    case ThemeMode::DarkGlass: return L"Dark Glass";
-    case ThemeMode::HighContrast: return L"High Contrast";
-    case ThemeMode::Sepia: return L"Sepia";
-    case ThemeMode::Paper:
-    default: return L"Paper";
+[[nodiscard]] bool contains_case_insensitive(std::wstring_view haystack, std::wstring_view needle) noexcept {
+    if (needle.empty()) {
+        return true;
     }
+    const auto to_lower = [](wchar_t ch) { return static_cast<wchar_t>(std::towlower(ch)); };
+    const auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                                [&](wchar_t a, wchar_t b) { return to_lower(a) == to_lower(b); });
+    return it != haystack.end();
 }
 
-[[nodiscard]] ThemeMode next_theme(ThemeMode theme) noexcept {
-    switch (theme) {
-    case ThemeMode::Paper: return ThemeMode::DarkGlass;
-    case ThemeMode::DarkGlass: return ThemeMode::HighContrast;
-    case ThemeMode::HighContrast: return ThemeMode::Sepia;
-    case ThemeMode::Sepia:
-    default: return ThemeMode::Paper;
+[[nodiscard]] std::wstring format_time(std::int64_t epoch_seconds) {
+    if (epoch_seconds == 0) {
+        return L"—";
+    }
+    const auto raw = static_cast<std::time_t>(epoch_seconds);
+    std::tm local{};
+    if (localtime_s(&local, &raw) != 0) {
+        return L"—";
+    }
+    wchar_t buffer[32]{};
+    if (std::wcsftime(buffer, ARRAYSIZE(buffer), L"%m-%d %H:%M", &local) == 0) {
+        return L"—";
+    }
+    return buffer;
+}
+
+[[nodiscard]] COLORREF to_colorref(D2D1_COLOR_F color) noexcept {
+    return RGB(static_cast<BYTE>(color.r * 255.0F + 0.5F), static_cast<BYTE>(color.g * 255.0F + 0.5F),
+              static_cast<BYTE>(color.b * 255.0F + 0.5F));
+}
+
+[[nodiscard]] D2D1_COLOR_F button_fill_color(core::AppState state, const Palette& palette) noexcept {
+    switch (state) {
+    case core::AppState::Capturing: return palette.record;
+    case core::AppState::Cancelled:
+    case core::AppState::Failed: return palette.muted;
+    case core::AppState::Idle:
+    case core::AppState::Starting:
+    case core::AppState::Recognizing:
+    case core::AppState::PostProcessing:
+    case core::AppState::Confirming:
+    case core::AppState::Injecting:
+    default: return palette.accent;
     }
 }
 
 [[nodiscard]] std::wstring state_label(core::AppState state, core::ErrorCode error) {
     if (state == core::AppState::Failed && error == core::ErrorCode::RecognitionUnavailable) {
         return L"识别模型未就绪";
-    }
-    if (state == core::AppState::Failed) {
-        return L"失败";
     }
     switch (state) {
     case core::AppState::Idle: return L"就绪";
@@ -88,9 +122,44 @@ struct Colors {
     case core::AppState::Confirming: return L"待确认";
     case core::AppState::Injecting: return L"输入中";
     case core::AppState::Cancelled: return L"已取消";
-    case core::AppState::Failed: return error == core::ErrorCode::RecognitionUnavailable ? L"识别模型未就绪" : L"失败";
+    case core::AppState::Failed: return L"失败";
     }
     return L"就绪";
+}
+
+void draw_text(ID2D1RenderTarget* target, IDWriteFactory* write_factory, const std::wstring& text, D2D1_RECT_F rect,
+              float size, D2D1_COLOR_F color, DWRITE_FONT_WEIGHT weight, DWRITE_TEXT_ALIGNMENT align,
+              const wchar_t* family = L"Segoe UI") noexcept {
+    if (target == nullptr || write_factory == nullptr || text.empty()) {
+        return;
+    }
+    ComPtr<IDWriteTextFormat> format;
+    (void)write_factory->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                          size, L"zh-CN", &format);
+    if (format == nullptr) {
+        return;
+    }
+    (void)format->SetTextAlignment(align);
+    (void)format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+    ComPtr<ID2D1SolidColorBrush> brush;
+    (void)target->CreateSolidColorBrush(color, &brush);
+    if (brush != nullptr) {
+        target->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format.Get(), rect, brush.Get(),
+                          D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    }
+}
+
+void draw_glow_circle(ID2D1RenderTarget* target, D2D1_POINT_2F center, float radius, D2D1_COLOR_F color, float alpha) noexcept {
+    ComPtr<ID2D1SolidColorBrush> brush;
+    for (int layer = 4; layer >= 1; --layer) {
+        const float grow = static_cast<float>(layer) * 5.0F;
+        const float layer_alpha = 0.05F * static_cast<float>(5 - layer) * alpha;
+        brush.Reset();
+        (void)target->CreateSolidColorBrush(D2D1::ColorF(color.r, color.g, color.b, layer_alpha), &brush);
+        if (brush != nullptr) {
+            target->FillEllipse(D2D1::Ellipse(center, radius + grow, radius + grow), brush.Get());
+        }
+    }
 }
 
 }  // namespace
@@ -100,6 +169,12 @@ MainWindow::MainWindow(HINSTANCE instance) noexcept : instance_(instance) {}
 MainWindow::~MainWindow() {
     if (tooltip_ != nullptr) {
         DestroyWindow(tooltip_);
+    }
+    if (search_bk_brush_ != nullptr) {
+        DeleteObject(search_bk_brush_);
+    }
+    if (search_font_ != nullptr) {
+        DeleteObject(search_font_);
     }
     discard_resources();
     if (hwnd_ != nullptr) {
@@ -126,9 +201,11 @@ bool MainWindow::create() noexcept {
     if (hwnd_ == nullptr) {
         return false;
     }
+    apply_dark_titlebar();
     create_resources();
+    create_search_edit();
     create_tooltips();
-    return render_target_ != nullptr;
+    return composition_ready_ || fallback_target_ != nullptr;
 }
 
 void MainWindow::set_icon(HICON icon) noexcept { icon_ = icon; }
@@ -145,6 +222,8 @@ void MainWindow::set_first_paint_handler(Action handler) { first_paint_handler_ 
 
 void MainWindow::set_theme(ThemeMode theme) noexcept {
     theme_ = theme;
+    apply_dark_titlebar();
+    update_search_brush();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -165,6 +244,12 @@ void MainWindow::show() noexcept {
     ShowWindow(hwnd_, SW_SHOWNORMAL);
     SetForegroundWindow(hwnd_);
     (void)UpdateWindow(hwnd_);
+    if (composition_ready_) {
+        opacity_ = 0.0F;
+        target_opacity_ = 1.0F;
+        surface_.set_opacity(0.0F);
+        SetTimer(hwnd_, kAnimTimerId, kAnimIntervalMs, nullptr);
+    }
 }
 
 void MainWindow::hide() noexcept { ShowWindow(hwnd_, SW_HIDE); }
@@ -176,6 +261,8 @@ void MainWindow::toggle_theme() noexcept {
     if (theme_handler_) {
         theme_handler_();
     }
+    apply_dark_titlebar();
+    update_search_brush();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -188,12 +275,17 @@ void MainWindow::set_stats(SessionStats stats) noexcept {
 
 void MainWindow::open_settings() noexcept {
     settings_open_ = true;
+    focus_index_ = 0;
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void MainWindow::set_state(core::AppState state) noexcept {
+    const bool was_capturing = state_ == core::AppState::Capturing;
     state_ = state;
     error_ = core::ErrorCode::None;
+    if (!was_capturing && state == core::AppState::Capturing) {
+        SetTimer(hwnd_, kAnimTimerId, kAnimIntervalMs, nullptr);
+    }
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -203,7 +295,7 @@ void MainWindow::set_error(core::ErrorCode error) noexcept {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void MainWindow::add_history(std::string text) {
+void MainWindow::add_history(std::string text, std::int64_t epoch_seconds) {
     if (text.empty()) {
         return;
     }
@@ -213,16 +305,102 @@ void MainWindow::add_history(std::string text) {
     }
     std::wstring wide(static_cast<std::size_t>(length), L'\0');
     (void)MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), length);
-    history_.insert(history_.begin(), std::move(wide));
+    history_.insert(history_.begin(), HistoryEntry{std::move(wide), epoch_seconds});
     if (history_.size() > 20) {
         history_.pop_back();
     }
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    refresh_search();
 }
 
 void MainWindow::clear_history() noexcept {
     history_.clear();
+    refresh_search();
+}
+
+void MainWindow::refresh_search() noexcept {
+    if (search_edit_ != nullptr) {
+        wchar_t buffer[256]{};
+        GetWindowTextW(search_edit_, buffer, ARRAYSIZE(buffer));
+        search_query_ = buffer;
+    }
+    visible_history_.clear();
+    for (std::size_t index = 0; index < history_.size(); ++index) {
+        if (contains_case_insensitive(history_[index].text, search_query_)) {
+            visible_history_.push_back(index);
+        }
+    }
+    if (hwnd_ != nullptr) {
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+}
+
+void MainWindow::create_search_edit() noexcept {
+    if (search_font_ == nullptr) {
+        search_font_ = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                   CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    }
+    const Layout layout = compute_layout();
+    const int x = static_cast<int>(layout.search_pill.left) + 40;
+    const int y = static_cast<int>(layout.search_pill.top) + 8;
+    const int w = static_cast<int>(layout.search_pill.right - layout.search_pill.left) - 56;
+    const int h = static_cast<int>(layout.search_pill.bottom - layout.search_pill.top) - 16;
+    search_edit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, x, y, w, h, hwnd_,
+                                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSearchEditId)), instance_, nullptr);
+    if (search_edit_ == nullptr) {
+        return;
+    }
+    if (search_font_ != nullptr) {
+        SendMessageW(search_edit_, WM_SETFONT, reinterpret_cast<WPARAM>(search_font_), TRUE);
+    }
+    (void)SendMessageW(search_edit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"搜索历史记录"));
+    update_search_brush();
+}
+
+void MainWindow::update_search_brush() noexcept {
+    if (search_bk_brush_ != nullptr) {
+        DeleteObject(search_bk_brush_);
+        search_bk_brush_ = nullptr;
+    }
+    const Palette palette = palette_for(theme_);
+    search_bk_brush_ = CreateSolidBrush(to_colorref(palette.panel));
+    if (search_edit_ != nullptr) {
+        InvalidateRect(search_edit_, nullptr, TRUE);
+    }
+}
+
+void MainWindow::apply_dark_titlebar() noexcept {
+    if (hwnd_ == nullptr) {
+        return;
+    }
+    const Palette palette = palette_for(theme_);
+    const BOOL dark = theme_ == ThemeMode::DarkGlass ? TRUE : FALSE;
+    (void)DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    const COLORREF caption = to_colorref(palette.canvas);
+    (void)DwmSetWindowAttribute(hwnd_, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
+    const COLORREF text_color = to_colorref(palette.ink);
+    (void)DwmSetWindowAttribute(hwnd_, DWMWA_TEXT_COLOR, &text_color, sizeof(text_color));
+    const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
+    (void)DwmSetWindowAttribute(hwnd_, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+}
+
+void MainWindow::tick_animation() noexcept {
+    bool active = false;
+    if (opacity_ != target_opacity_) {
+        constexpr float kStep = 0.25F;
+        opacity_ = opacity_ < target_opacity_ ? std::min(target_opacity_, opacity_ + kStep)
+                                              : std::max(target_opacity_, opacity_ - kStep);
+        if (composition_ready_) {
+            surface_.set_opacity(opacity_);
+        }
+        active = true;
+    }
+    if (state_ == core::AppState::Capturing) {
+        active = true;
+    }
     InvalidateRect(hwnd_, nullptr, FALSE);
+    if (!active) {
+        KillTimer(hwnd_, kAnimTimerId);
+    }
 }
 
 LRESULT CALLBACK MainWindow::window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
@@ -259,10 +437,36 @@ LRESULT MainWindow::handle_window_message(UINT message, WPARAM wparam, LPARAM lp
     }
     case WM_SIZE:
         if (wparam != SIZE_MINIMIZED) {
-            discard_resources();
-            create_resources();
+            if (composition_ready_) {
+                surface_.resize(LOWORD(lparam), HIWORD(lparam));
+            } else {
+                discard_resources();
+                create_resources();
+            }
         }
         return 0;
+    case WM_TIMER:
+        if (wparam == kAnimTimerId) {
+            tick_animation();
+        }
+        return 0;
+    case WM_CTLCOLOREDIT: {
+        if (reinterpret_cast<HWND>(lparam) == search_edit_) {
+            const Palette palette = palette_for(theme_);
+            HDC dc = reinterpret_cast<HDC>(wparam);
+            SetTextColor(dc, to_colorref(palette.ink));
+            SetBkColor(dc, to_colorref(palette.panel));
+            SetBkMode(dc, OPAQUE);
+            return reinterpret_cast<LRESULT>(search_bk_brush_);
+        }
+        break;
+    }
+    case WM_COMMAND:
+        if (reinterpret_cast<HWND>(lparam) == search_edit_ && HIWORD(wparam) == EN_CHANGE) {
+            refresh_search();
+            return 0;
+        }
+        break;
     case WM_LBUTTONUP: {
         const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         const auto regions = build_focus_regions();
@@ -292,37 +496,35 @@ LRESULT MainWindow::handle_window_message(UINT message, WPARAM wparam, LPARAM lp
     case WM_DESTROY:
         return 0;
     default:
-        return DefWindowProcW(hwnd_, message, wparam, lparam);
+        break;
     }
+    return DefWindowProcW(hwnd_, message, wparam, lparam);
 }
 
 std::vector<MainWindow::FocusRegion> MainWindow::build_focus_regions() {
     std::vector<FocusRegion> regions;
-    // D4: identical rects to create_tooltips() by construction -- every region a mouse can
-    // click and hover a tooltip on is also a region Tab can reach and Enter/Space can activate.
+    const Layout layout = compute_layout();
+    const auto to_rect = [](D2D1_RECT_F r) {
+        return RECT{static_cast<LONG>(r.left), static_cast<LONG>(r.top), static_cast<LONG>(r.right), static_cast<LONG>(r.bottom)};
+    };
     if (settings_open_) {
-        regions.push_back({RECT{12, 12, 96, 68}, [this] {
+        regions.push_back({to_rect(layout.back_button), [this] {
                                 settings_open_ = false;
                                 focus_index_ = 0;
                                 InvalidateRect(hwnd_, nullptr, FALSE);
                             }});
-        regions.push_back({RECT{20, 132, 340, 244}, [this] {
+        regions.push_back({to_rect(layout.trigger_mode_card), [this] {
                                 toggle_mode_ = !toggle_mode_;
                                 if (trigger_mode_handler_) trigger_mode_handler_();
                                 InvalidateRect(hwnd_, nullptr, FALSE);
                             }});
+        return regions;
     }
-    regions.push_back({RECT{kWidth - 150, 12, kWidth - 82, 62}, [this] { toggle_theme(); }});
-    regions.push_back({RECT{kWidth - 76, 12, kWidth - 20, 62}, [this] {
-                            settings_open_ = true;
-                            focus_index_ = 0;
-                            InvalidateRect(hwnd_, nullptr, FALSE);
+    regions.push_back({to_rect(layout.theme_button), [this] { toggle_theme(); }});
+    regions.push_back({to_rect(layout.settings_button), [this] { open_settings(); }});
+    regions.push_back({to_rect(layout.clear_all_button), [this] {
+                            if (history_clear_handler_) history_clear_handler_();
                         }});
-    if (!settings_open_) {
-        regions.push_back({RECT{kWidth - 126, 364, kWidth - 20, 430}, [this] {
-                                if (history_clear_handler_) history_clear_handler_();
-                            }});
-    }
     return regions;
 }
 
@@ -350,120 +552,217 @@ void MainWindow::create_resources() noexcept {
     if (hwnd_ == nullptr) {
         return;
     }
-    RECT rect{};
-    GetClientRect(hwnd_, &rect);
-    if (d2d_factory_ == nullptr) {
-        (void)D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d_factory_.GetAddressOf());
-    }
     if (write_factory_ == nullptr) {
-        (void)DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(write_factory_.GetAddressOf()));
+        (void)DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                  reinterpret_cast<IUnknown**>(write_factory_.GetAddressOf()));
     }
-    if (d2d_factory_ != nullptr && render_target_ == nullptr) {
-        const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                                                               D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE));
-        const auto size = D2D1::SizeU(static_cast<UINT32>(rect.right - rect.left), static_cast<UINT32>(rect.bottom - rect.top));
-        (void)d2d_factory_->CreateHwndRenderTarget(properties, D2D1::HwndRenderTargetProperties(hwnd_, size), &render_target_);
+    if (!composition_ready_ && fallback_target_ == nullptr) {
+        composition_ready_ = surface_.attach(hwnd_, kWidth, kHeight);
+    }
+    if (!composition_ready_ && fallback_target_ == nullptr) {
+        RECT rect{};
+        GetClientRect(hwnd_, &rect);
+        if (fallback_factory_ == nullptr) {
+            (void)D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, fallback_factory_.GetAddressOf());
+        }
+        if (fallback_factory_ != nullptr) {
+            const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                                                                  D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE));
+            const auto size = D2D1::SizeU(static_cast<UINT32>(rect.right - rect.left), static_cast<UINT32>(rect.bottom - rect.top));
+            (void)fallback_factory_->CreateHwndRenderTarget(properties, D2D1::HwndRenderTargetProperties(hwnd_, size),
+                                                            &fallback_target_);
+        }
     }
 }
 
-void MainWindow::discard_resources() noexcept { render_target_.Reset(); }
-
-void MainWindow::draw_text(const std::wstring& value, D2D1_RECT_F rect, float size, bool english) noexcept {
-    if (render_target_ == nullptr || write_factory_ == nullptr) {
-        return;
-    }
-    ComPtr<IDWriteTextFormat> format;
-    (void)write_factory_->CreateTextFormat(english ? L"Times New Roman" : L"SimSun", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                                           DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, L"zh-CN", &format);
-    if (format == nullptr) {
-        return;
-    }
-    ComPtr<ID2D1SolidColorBrush> brush;
-    const Colors palette = colors(theme_);
-    (void)render_target_->CreateSolidColorBrush(palette.ink, &brush);
-    if (brush != nullptr) {
-        render_target_->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format.Get(), rect, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
-    }
-}
+void MainWindow::discard_resources() noexcept { fallback_target_.Reset(); }
 
 void MainWindow::render() noexcept {
-    if (render_target_ == nullptr) {
-        create_resources();
-    }
-    if (render_target_ == nullptr) {
+    if (composition_ready_) {
+        if (ID2D1DeviceContext* dc = surface_.begin_draw(); dc != nullptr) {
+            render_content(dc);
+            surface_.end_draw();
+        }
         return;
     }
-    const Colors palette = colors(theme_);
+    if (fallback_target_ == nullptr) {
+        create_resources();
+    }
+    if (fallback_target_ == nullptr) {
+        return;
+    }
+    fallback_target_->BeginDraw();
+    render_content(fallback_target_.Get());
+    const HRESULT result = fallback_target_->EndDraw();
+    if (result == D2DERR_RECREATE_TARGET) {
+        discard_resources();
+    }
+}
+
+void MainWindow::render_content(ID2D1RenderTarget* target) noexcept {
+    if (target == nullptr) {
+        return;
+    }
+    const Palette palette = palette_for(theme_);
+    const Layout layout = compute_layout();
+    const float alpha = composition_ready_ ? opacity_ : 1.0F;
+
     ComPtr<ID2D1SolidColorBrush> brush;
-    (void)render_target_->CreateSolidColorBrush(palette.background, &brush);
-    render_target_->BeginDraw();
-    render_target_->Clear(palette.background);
-    const auto fill = [&](D2D1_RECT_F rect, D2D1_COLOR_F color) {
+    if (composition_ready_) {
+        target->Clear(D2D1::ColorF(palette.canvas.r, palette.canvas.g, palette.canvas.b, alpha));
+    } else {
+        target->Clear(palette.canvas);
+    }
+
+    const auto fill_rounded = [&](D2D1_RECT_F rect, D2D1_COLOR_F color, float radius) {
         brush.Reset();
-        (void)render_target_->CreateSolidColorBrush(color, &brush);
+        (void)target->CreateSolidColorBrush(D2D1::ColorF(color.r, color.g, color.b, color.a * alpha), &brush);
         if (brush != nullptr) {
-            render_target_->FillRectangle(rect, brush.Get());
+            target->FillRoundedRectangle(D2D1::RoundedRect(rect, radius, radius), brush.Get());
         }
     };
-    fill(D2D1::RectF(0, 0, static_cast<float>(kWidth), 68), palette.surface);
-    fill(D2D1::RectF(24, 28, 36, 40), palette.accent);
-    draw_text(state_label(state_, error_), D2D1::RectF(52, 22, 190, 50), 16.0F);
-    draw_text(theme_ == ThemeMode::Paper ? L"◐ 主题" : L"◑ 主题", D2D1::RectF(kWidth - 150.0F, 22, kWidth - 86.0F, 50), 13.0F);
-    draw_text(L"⚙", D2D1::RectF(kWidth - 68.0F, 19, kWidth - 28.0F, 54), 22.0F, true);
+
+    // status dot + label
+    brush.Reset();
+    (void)target->CreateSolidColorBrush(D2D1::ColorF(palette.accent.r, palette.accent.g, palette.accent.b, alpha), &brush);
+    if (brush != nullptr) {
+        target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(layout.status_row.left + 5.0F, layout.status_row.top + 20.0F), 4.0F, 4.0F),
+                            brush.Get());
+    }
+    draw_text(target, write_factory_.Get(), state_label(state_, error_),
+             D2D1::RectF(layout.status_row.left + 16.0F, layout.status_row.top + 6.0F, layout.status_row.right, layout.status_row.top + 30.0F),
+             13.0F, D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_LEADING);
+
+    // top-right icon buttons
+    fill_rounded(layout.theme_button, palette.panel, 12.0F);
+    fill_rounded(layout.settings_button, palette.panel, 12.0F);
+    draw_text(target, write_factory_.Get(), theme_ == ThemeMode::DarkGlass ? L"◑" : L"◐", layout.theme_button, 17.0F,
+             D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL,
+             DWRITE_TEXT_ALIGNMENT_CENTER, L"Segoe UI Symbol");
+    draw_text(target, write_factory_.Get(), L"⚙", layout.settings_button, 18.0F,
+             D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL,
+             DWRITE_TEXT_ALIGNMENT_CENTER, L"Segoe UI Symbol");
 
     if (settings_open_) {
-        draw_text(L"返回", D2D1::RectF(24, 22, 84, 52), 14.0F);
-        draw_text(L"快捷键", D2D1::RectF(40, 112, 170, 146), 18.0F);
-        draw_text(toggle_mode_ ? L"当前  切换模式" : L"当前  按住模式", D2D1::RectF(40, 158, 300, 190), 15.0F);
-        draw_text(L"外观", D2D1::RectF(40, 286, 170, 320), 18.0F);
-        draw_text(theme_name(theme_), D2D1::RectF(40, 332, 260, 366), 16.0F, true);
-        // C5: today / all-time dictation counts and total characters, computed by the caller
-        // from HistoryStore and handed in via set_stats -- purely a readout, no click target.
-        draw_text(L"使用统计", D2D1::RectF(380, 112, 560, 146), 18.0F);
-        draw_text(L"今日  " + std::to_wstring(stats_.dictations_today) + L" 次", D2D1::RectF(380, 158, 620, 188), 15.0F, true);
-        draw_text(L"累计  " + std::to_wstring(stats_.dictations_total) + L" 次", D2D1::RectF(380, 192, 620, 222), 15.0F, true);
-        draw_text(L"累计字数  " + std::to_wstring(stats_.characters_total), D2D1::RectF(380, 226, 640, 256), 15.0F, true);
+        fill_rounded(layout.back_button, palette.panel, 12.0F);
+        draw_text(target, write_factory_.Get(), L"← 返回", layout.back_button, 13.0F,
+                 D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                 DWRITE_TEXT_ALIGNMENT_CENTER);
+
+        fill_rounded(layout.trigger_mode_card, palette.panel, 16.0F);
+        draw_text(target, write_factory_.Get(), L"触发方式", D2D1::RectF(layout.trigger_mode_card.left + 18, layout.trigger_mode_card.top + 14, layout.trigger_mode_card.right - 16, layout.trigger_mode_card.top + 40),
+                 12.0F, D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text(target, write_factory_.Get(), toggle_mode_ ? L"切换模式 · 点按开始/停止" : L"按住模式 · 按住 Right Ctrl 说话",
+                 D2D1::RectF(layout.trigger_mode_card.left + 18, layout.trigger_mode_card.top + 42, layout.trigger_mode_card.right - 16, layout.trigger_mode_card.top + 74),
+                 15.0F, D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING);
+
+        fill_rounded(layout.appearance_card, palette.panel, 16.0F);
+        draw_text(target, write_factory_.Get(), L"外观", D2D1::RectF(layout.appearance_card.left + 18, layout.appearance_card.top + 14, layout.appearance_card.right - 16, layout.appearance_card.top + 40),
+                 12.0F, D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text(target, write_factory_.Get(), std::wstring(theme_name(theme_)) + L" · 点击顶部图标切换",
+                 D2D1::RectF(layout.appearance_card.left + 18, layout.appearance_card.top + 42, layout.appearance_card.right - 16, layout.appearance_card.top + 74),
+                 15.0F, D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING);
+
+        fill_rounded(layout.stats_card, palette.panel, 16.0F);
+        draw_text(target, write_factory_.Get(), L"使用统计", D2D1::RectF(layout.stats_card.left + 18, layout.stats_card.top + 14, layout.stats_card.right - 16, layout.stats_card.top + 40),
+                 12.0F, D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text(target, write_factory_.Get(), L"今日  " + std::to_wstring(stats_.dictations_today) + L" 次",
+                 D2D1::RectF(layout.stats_card.left + 18, layout.stats_card.top + 44, layout.stats_card.right - 16, layout.stats_card.top + 68),
+                 14.0F, D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text(target, write_factory_.Get(), L"累计  " + std::to_wstring(stats_.dictations_total) + L" 次",
+                 D2D1::RectF(layout.stats_card.left + 18, layout.stats_card.top + 72, layout.stats_card.right - 16, layout.stats_card.top + 96),
+                 14.0F, D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text(target, write_factory_.Get(), L"累计字数  " + std::to_wstring(stats_.characters_total),
+                 D2D1::RectF(layout.stats_card.left + 18, layout.stats_card.top + 100, layout.stats_card.right - 16, layout.stats_card.top + 124),
+                 14.0F, D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING);
     } else {
-        fill(D2D1::RectF(0, 68, static_cast<float>(kWidth), 292), palette.surface);
-        fill(D2D1::RectF(260, 118, 420, 278), palette.accent);
-        draw_text(L"按住右 Ctrl 说话", D2D1::RectF(216, 300, 468, 334), 20.0F);
-        draw_text(L"最近记录", D2D1::RectF(32, 386, 150, 414), 14.0F);
-        draw_text(L"清空", D2D1::RectF(kWidth - 90.0F, 386, kWidth - 32.0F, 414), 13.0F);
-        if (history_.empty()) {
-            draw_text(L"", D2D1::RectF(32, 426, 620, 452), 14.0F);
-        } else {
-            draw_text(history_.front(), D2D1::RectF(32, 426, 638, 454), 14.0F);
+        // search pill background (the real EDIT child sits inset on top of this)
+        fill_rounded(layout.search_pill, palette.panel, (layout.search_pill.bottom - layout.search_pill.top) / 2.0F);
+        const float lens_cx = layout.search_pill.left + 22.0F;
+        const float lens_cy = (layout.search_pill.top + layout.search_pill.bottom) / 2.0F;
+        brush.Reset();
+        (void)target->CreateSolidColorBrush(D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), &brush);
+        if (brush != nullptr) {
+            target->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(lens_cx - 1.0F, lens_cy - 1.0F), 5.0F, 5.0F), brush.Get(), 1.6F);
+            target->DrawLine(D2D1::Point2F(lens_cx + 3.0F, lens_cy + 3.0F), D2D1::Point2F(lens_cx + 7.0F, lens_cy + 7.0F), brush.Get(), 1.6F);
         }
+
+        target->PushAxisAlignedClip(layout.history_area, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        if (visible_history_.empty()) {
+            draw_text(target, write_factory_.Get(), history_.empty() ? L"还没有识别记录" : L"没有匹配结果",
+                     D2D1::RectF(layout.history_area.left, layout.history_area.top + 12, layout.history_area.right, layout.history_area.top + 40),
+                     13.0F, D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_NORMAL,
+                     DWRITE_TEXT_ALIGNMENT_LEADING);
+        } else {
+            float y = layout.history_area.top;
+            for (const auto index : visible_history_) {
+                if (y + kCardHeight > layout.history_area.bottom) {
+                    break;
+                }
+                const D2D1_RECT_F card = D2D1::RectF(layout.history_area.left, y, layout.history_area.right, y + kCardHeight);
+                fill_rounded(card, palette.panel_alt, 14.0F);
+                draw_text(target, write_factory_.Get(), history_[index].text,
+                         D2D1::RectF(card.left + 16, card.top + 10, card.right - 16, card.top + 36), 13.5F,
+                         D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL,
+                         DWRITE_TEXT_ALIGNMENT_LEADING);
+                brush.Reset();
+                (void)target->CreateSolidColorBrush(D2D1::ColorF(palette.border.r, palette.border.g, palette.border.b, 0.6F * alpha), &brush);
+                if (brush != nullptr) {
+                    target->DrawLine(D2D1::Point2F(card.left + 16, card.top + 42), D2D1::Point2F(card.right - 16, card.top + 42), brush.Get(), 1.0F);
+                }
+                draw_text(target, write_factory_.Get(), format_time(history_[index].epoch_seconds),
+                         D2D1::RectF(card.left + 16, card.top + 46, card.right - 16, card.top + 62), 11.0F,
+                         D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_NORMAL,
+                         DWRITE_TEXT_ALIGNMENT_LEADING);
+                y += kCardHeight + kCardGap;
+            }
+        }
+        target->PopAxisAlignedClip();
+
+        const D2D1_COLOR_F button_color = button_fill_color(state_, palette);
+        draw_glow_circle(target, layout.record_button.point, layout.record_button.radiusX, palette.glow, alpha * 0.5F);
+        brush.Reset();
+        (void)target->CreateSolidColorBrush(D2D1::ColorF(button_color.r, button_color.g, button_color.b, alpha), &brush);
+        if (brush != nullptr) {
+            target->FillEllipse(layout.record_button, brush.Get());
+        }
+
+        draw_text(target, write_factory_.Get(), L"按住 Right Ctrl 说话，松开自动输入到当前窗口", layout.hint_text, 11.5F,
+                 D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text(target, write_factory_.Get(), L"清空", layout.clear_all_button, 13.0F,
+                 D2D1::ColorF(palette.accent.r, palette.accent.g, palette.accent.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                 DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
-    // D4: visible focus ring around whichever region Tab currently lands on, only while this
-    // window actually holds keyboard focus -- keeps mouse-only use visually unchanged.
+
     if (focus_index_ >= 0 && GetFocus() == hwnd_) {
         const auto regions = build_focus_regions();
         if (focus_index_ < static_cast<int>(regions.size())) {
             const RECT& region = regions[static_cast<std::size_t>(focus_index_)].rect;
             brush.Reset();
-            (void)render_target_->CreateSolidColorBrush(palette.accent, &brush);
+            (void)target->CreateSolidColorBrush(D2D1::ColorF(palette.accent.r, palette.accent.g, palette.accent.b, alpha), &brush);
             if (brush != nullptr) {
-                render_target_->DrawRectangle(D2D1::RectF(static_cast<float>(region.left) - 2.0F, static_cast<float>(region.top) - 2.0F,
-                                                          static_cast<float>(region.right) + 2.0F, static_cast<float>(region.bottom) + 2.0F),
-                                              brush.Get(), 2.0F);
+                target->DrawRectangle(D2D1::RectF(static_cast<float>(region.left) - 2.0F, static_cast<float>(region.top) - 2.0F,
+                                                  static_cast<float>(region.right) + 2.0F, static_cast<float>(region.bottom) + 2.0F),
+                                      brush.Get(), 2.0F);
             }
         }
-    }
-    const HRESULT result = render_target_->EndDraw();
-    if (result == D2DERR_RECREATE_TARGET) {
-        discard_resources();
     }
 }
 
 void MainWindow::create_tooltips() noexcept {
     INITCOMMONCONTROLSEX controls{sizeof(INITCOMMONCONTROLSEX), ICC_WIN95_CLASSES};
     (void)InitCommonControlsEx(&controls);
-    tooltip_ = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP,
-                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, hwnd_, nullptr, instance_, nullptr);
+    tooltip_ = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT,
+                               CW_USEDEFAULT, CW_USEDEFAULT, hwnd_, nullptr, instance_, nullptr);
     if (tooltip_ == nullptr) {
         return;
     }
+    const Layout layout = compute_layout();
+    const auto to_rect = [](D2D1_RECT_F r) {
+        return RECT{static_cast<LONG>(r.left), static_cast<LONG>(r.top), static_cast<LONG>(r.right), static_cast<LONG>(r.bottom)};
+    };
     const auto add_tooltip = [this](UINT_PTR id, RECT rect, wchar_t* text) {
         TOOLINFOW info{};
         info.cbSize = sizeof(info);
@@ -474,11 +773,16 @@ void MainWindow::create_tooltips() noexcept {
         info.rect = rect;
         (void)SendMessageW(tooltip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
     };
-    add_tooltip(1, RECT{kWidth - 150, 12, kWidth - 82, 62}, const_cast<wchar_t*>(L"切换主题"));
-    add_tooltip(2, RECT{kWidth - 76, 12, kWidth - 20, 62}, const_cast<wchar_t*>(L"打开设置"));
-    add_tooltip(3, RECT{kWidth - 126, 364, kWidth - 20, 430}, const_cast<wchar_t*>(L"清空历史"));
-    add_tooltip(4, RECT{12, 12, 96, 68}, const_cast<wchar_t*>(L"返回主界面"));
-    add_tooltip(5, RECT{20, 132, 340, 244}, const_cast<wchar_t*>(L"切换按住或切换录音"));
+    add_tooltip(1, to_rect(layout.theme_button), const_cast<wchar_t*>(L"切换主题"));
+    add_tooltip(2, to_rect(layout.settings_button), const_cast<wchar_t*>(L"打开设置"));
+    add_tooltip(3, to_rect(layout.clear_all_button), const_cast<wchar_t*>(L"清空历史"));
+    add_tooltip(4, to_rect(layout.back_button), const_cast<wchar_t*>(L"返回主界面"));
+    add_tooltip(5, to_rect(layout.trigger_mode_card), const_cast<wchar_t*>(L"切换按住或切换录音"));
+    const RECT record_rect{static_cast<LONG>(layout.record_button.point.x - layout.record_button.radiusX),
+                           static_cast<LONG>(layout.record_button.point.y - layout.record_button.radiusY),
+                           static_cast<LONG>(layout.record_button.point.x + layout.record_button.radiusX),
+                           static_cast<LONG>(layout.record_button.point.y + layout.record_button.radiusY)};
+    add_tooltip(6, record_rect, const_cast<wchar_t*>(L"按住 Right Ctrl 说话"));
 }
 
 }  // namespace aevocis::ui
