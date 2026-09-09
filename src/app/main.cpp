@@ -39,6 +39,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 #include <shellapi.h>
 
@@ -301,20 +302,32 @@ private:
         return false;
     }
 
-    // True if any modifier other than the push-to-talk key itself is currently down.
-    // Used to reject a push-to-talk trigger that arrives as part of a chord (Ctrl+Alt,
-    // Ctrl+Shift, AltGr's synthetic Ctrl+Alt, etc.) so only a standalone right-Ctrl press
-    // ever starts recording.
-    [[nodiscard]] static bool is_other_modifier_held() noexcept {
-        return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 || (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0 ||
-               (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0 || (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
-               (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0 || (GetAsyncKeyState(VK_RSHIFT) & 0x8000) != 0 ||
-               (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0 ||
-               (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0;
+    // True if any key other than the push-to-talk key itself is currently held -- not just
+    // modifiers, any key at all (Ctrl+A, Ctrl+C, Ctrl+<letter>, ...). other_keys_down_ is fed
+    // by every non-push-to-talk key event this same hook delivers; pruned against live
+    // GetAsyncKeyState first so a key-up event the hook happens to miss (e.g. swallowed during
+    // a focus switch) can't permanently wedge push-to-talk off.
+    [[nodiscard]] bool is_other_key_held() noexcept {
+        for (auto it = other_keys_down_.begin(); it != other_keys_down_.end();) {
+            if ((GetAsyncKeyState(static_cast<int>(*it)) & 0x8000) == 0) {
+                it = other_keys_down_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        return !other_keys_down_.empty();
     }
 
     void handle_keyboard(UINT virtual_key, bool down) {
         if (virtual_key != settings_.push_to_talk_virtual_key) {
+            // Track every other key's hold state so the push-to-talk key below can require a
+            // chord-free press -- pressing it together with any other key must never start
+            // recording, only a bare press of the key on its own.
+            if (down) {
+                other_keys_down_.insert(virtual_key);
+            } else {
+                other_keys_down_.erase(virtual_key);
+            }
             return;
         }
         {
@@ -335,11 +348,9 @@ private:
                 return;
             }
             // Only a bare push-to-talk key press (right Ctrl alone) may start a new
-            // recording. Windows synthesizes a Ctrl-down event as part of AltGr (and any
-            // other Ctrl+<modifier> chord also reports this same vkCode on down), so without
-            // this guard holding Alt/Shift/Win/left-Ctrl together with right Ctrl -- or an
-            // AltGr press on non-US keyboard layouts -- would incorrectly start recording.
-            if (is_other_modifier_held()) {
+            // recording -- holding any other key at the same time (a modifier chord like
+            // Ctrl+Alt/AltGr, or an ordinary chord like Ctrl+A/Ctrl+C) must not trigger it.
+            if (is_other_key_held()) {
                 return;
             }
             const TargetWindowToken target = TargetWindowToken::capture();
@@ -801,6 +812,9 @@ private:
     std::atomic<ULONGLONG> last_activity_tick_{0};
     ULONGLONG process_start_tick_{0};
     KeyboardHook keyboard_hook_;
+    // Keys currently reported down by the global keyboard hook, excluding the push-to-talk
+    // key itself. Only touched on the UI thread inside handle_keyboard, so no locking needed.
+    std::unordered_set<UINT> other_keys_down_;
     core::SingleTaskScheduler scheduler_;
     WasapiRecorder recorder_;
     platform::windows::SenseVoiceRecognizer recognizer_;
