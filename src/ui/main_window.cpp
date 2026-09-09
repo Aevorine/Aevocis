@@ -23,6 +23,9 @@ namespace {
 constexpr wchar_t kClassName[] = L"AevocisNativeCppWindow";
 constexpr int kWidth = 440;
 constexpr int kHeight = 680;
+// Every literal in compute_layout()/render_content() is authored against this baseline; the
+// actual monitor DPI is compared against it to derive MainWindow::dpi_scale().
+constexpr UINT kDefaultDpi = 96;
 // Must not collide with Application::kIdleTimerId (also 1, also SetTimer'd on this same HWND
 // from main.cpp) -- a shared id on the same window means the later SetTimer call silently
 // overrides the earlier one's interval, and Application::handle_message's WM_TIMER branch (which
@@ -207,6 +210,22 @@ bool MainWindow::create() noexcept {
     if (hwnd_ == nullptr) {
         return false;
     }
+    // The process declares per-monitor-v2 DPI awareness (see main.cpp), so Windows never
+    // auto-scales this window -- without this, kWidth/kHeight are used as physical pixels
+    // verbatim, and on anything above 100% scale the whole app renders far smaller on screen
+    // than every other (non-aware) app, which reads as "the UI looks broken". Resize to the
+    // real monitor's DPI before any resource/content is created; render_content() applies the
+    // matching Direct2D scale transform, and native child controls are sized in the affected
+    // functions below.
+    dpi_ = GetDpiForWindow(hwnd_);
+    if (dpi_ != kDefaultDpi) {
+        RECT window_rect{0, 0, MulDiv(kWidth, static_cast<int>(dpi_), static_cast<int>(kDefaultDpi)),
+                         MulDiv(kHeight, static_cast<int>(dpi_), static_cast<int>(kDefaultDpi))};
+        AdjustWindowRectExForDpi(&window_rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE,
+                                 WS_EX_TOOLWINDOW, dpi_);
+        SetWindowPos(hwnd_, nullptr, 0, 0, window_rect.right - window_rect.left, window_rect.bottom - window_rect.top,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
     apply_dark_titlebar();
     create_resources();
     create_search_edit();
@@ -343,15 +362,19 @@ void MainWindow::refresh_search() noexcept {
 }
 
 void MainWindow::create_search_edit() noexcept {
+    // Unlike the Direct2D content (scaled via render_content()'s transform), this is a real
+    // Win32 child window: its position/size and font must be scaled to physical pixels by hand.
+    const float scale = dpi_scale();
     if (search_font_ == nullptr) {
-        search_font_ = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                                   CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        search_font_ = CreateFontW(-static_cast<int>(std::lround(16.0F * scale)), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                   DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     }
     const Layout layout = compute_layout();
-    const int x = static_cast<int>(layout.search_pill.left) + 40;
-    const int y = static_cast<int>(layout.search_pill.top) + 8;
-    const int w = static_cast<int>(layout.search_pill.right - layout.search_pill.left) - 56;
-    const int h = static_cast<int>(layout.search_pill.bottom - layout.search_pill.top) - 16;
+    const int x = static_cast<int>(std::lround((layout.search_pill.left + 40.0F) * scale));
+    const int y = static_cast<int>(std::lround((layout.search_pill.top + 8.0F) * scale));
+    const int w = static_cast<int>(std::lround((layout.search_pill.right - layout.search_pill.left - 56.0F) * scale));
+    const int h = static_cast<int>(std::lround((layout.search_pill.bottom - layout.search_pill.top - 16.0F) * scale));
     search_edit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, x, y, w, h, hwnd_,
                                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSearchEditId)), instance_, nullptr);
     if (search_edit_ == nullptr) {
@@ -453,6 +476,34 @@ LRESULT MainWindow::handle_window_message(UINT message, WPARAM wparam, LPARAM lp
             }
         }
         return 0;
+    case WM_DPICHANGED: {
+        // Fires when the window moves to a monitor with a different scale factor. Resizing to
+        // Windows' suggested rect (lparam) triggers the WM_SIZE handler above, which already
+        // resizes the swap chain/fallback target to match -- only the DPI-dependent native
+        // child controls (not reached by that path, or by render_content()'s transform) need
+        // rebuilding here.
+        dpi_ = HIWORD(wparam);
+        const auto* suggested_rect = reinterpret_cast<const RECT*>(lparam);
+        SetWindowPos(hwnd_, nullptr, suggested_rect->left, suggested_rect->top,
+                    suggested_rect->right - suggested_rect->left, suggested_rect->bottom - suggested_rect->top,
+                    SWP_NOZORDER | SWP_NOACTIVATE);
+        if (search_edit_ != nullptr) {
+            DestroyWindow(search_edit_);
+            search_edit_ = nullptr;
+        }
+        if (search_font_ != nullptr) {
+            DeleteObject(search_font_);
+            search_font_ = nullptr;
+        }
+        create_search_edit();
+        if (tooltip_ != nullptr) {
+            DestroyWindow(tooltip_);
+            tooltip_ = nullptr;
+        }
+        create_tooltips();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    }
     case WM_TIMER:
         if (wparam == kAnimTimerId) {
             tick_animation();
@@ -476,7 +527,12 @@ LRESULT MainWindow::handle_window_message(UINT message, WPARAM wparam, LPARAM lp
         }
         break;
     case WM_LBUTTONUP: {
-        const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        // lparam is real client-area physical pixels; build_focus_regions() stays in the same
+        // 96-DPI-baseline space as compute_layout() (Direct2D's transform scales the drawing,
+        // not this), so the click point has to come back down to that space to compare.
+        const float scale = dpi_scale();
+        const POINT point{static_cast<LONG>(std::lround(static_cast<float>(GET_X_LPARAM(lparam)) / scale)),
+                          static_cast<LONG>(std::lround(static_cast<float>(GET_Y_LPARAM(lparam)) / scale))};
         const auto regions = build_focus_regions();
         for (const auto& region : regions) {
             if (point.x >= region.rect.left && point.x <= region.rect.right && point.y >= region.rect.top &&
@@ -564,19 +620,24 @@ void MainWindow::create_resources() noexcept {
         (void)DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                   reinterpret_cast<IUnknown**>(write_factory_.GetAddressOf()));
     }
+    // Physical client-area pixels, already accounting for the DPI resize in create() (or a
+    // later WM_DPICHANGED) -- this is what the swap chain/render target must match, not the
+    // 96-DPI-baseline kWidth/kHeight literals compute_layout() is authored against.
+    RECT client_rect{};
+    GetClientRect(hwnd_, &client_rect);
+    const int client_width = std::max<int>(client_rect.right - client_rect.left, 1);
+    const int client_height = std::max<int>(client_rect.bottom - client_rect.top, 1);
     if (!composition_ready_ && fallback_target_ == nullptr) {
-        composition_ready_ = surface_.attach(hwnd_, kWidth, kHeight);
+        composition_ready_ = surface_.attach(hwnd_, client_width, client_height);
     }
     if (!composition_ready_ && fallback_target_ == nullptr) {
-        RECT rect{};
-        GetClientRect(hwnd_, &rect);
         if (fallback_factory_ == nullptr) {
             (void)D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, fallback_factory_.GetAddressOf());
         }
         if (fallback_factory_ != nullptr) {
             const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
                                                                   D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE));
-            const auto size = D2D1::SizeU(static_cast<UINT32>(rect.right - rect.left), static_cast<UINT32>(rect.bottom - rect.top));
+            const auto size = D2D1::SizeU(static_cast<UINT32>(client_width), static_cast<UINT32>(client_height));
             (void)fallback_factory_->CreateHwndRenderTarget(properties, D2D1::HwndRenderTargetProperties(hwnd_, size),
                                                             &fallback_target_);
         }
@@ -621,6 +682,12 @@ void MainWindow::render_content(ID2D1RenderTarget* target) noexcept {
     } else {
         target->Clear(palette.canvas);
     }
+    // Clear() ignores the render target's transform and always fills the whole physical
+    // surface, so it's set here, after Clear and before any other drawing. Every rect/point
+    // below is still authored against the 96-DPI compute_layout() space; this one transform
+    // maps that whole space onto the real (possibly DPI-scaled) physical swap chain/render
+    // target instead of every literal in this function needing to be scaled by hand.
+    target->SetTransform(D2D1::Matrix3x2F::Scale(dpi_scale(), dpi_scale()));
 
     const auto fill_rounded = [&](D2D1_RECT_F rect, D2D1_COLOR_F color, float radius) {
         brush.Reset();
@@ -768,8 +835,12 @@ void MainWindow::create_tooltips() noexcept {
         return;
     }
     const Layout layout = compute_layout();
-    const auto to_rect = [](D2D1_RECT_F r) {
-        return RECT{static_cast<LONG>(r.left), static_cast<LONG>(r.top), static_cast<LONG>(r.right), static_cast<LONG>(r.bottom)};
+    // Like the search edit box, TOOLINFOW::rect is real Win32 client-area pixels, not
+    // Direct2D-transformed DIPs -- scale explicitly rather than passing the raw layout rect.
+    const float scale = dpi_scale();
+    const auto to_rect = [scale](D2D1_RECT_F r) {
+        return RECT{static_cast<LONG>(std::lround(r.left * scale)), static_cast<LONG>(std::lround(r.top * scale)),
+                    static_cast<LONG>(std::lround(r.right * scale)), static_cast<LONG>(std::lround(r.bottom * scale))};
     };
     const auto add_tooltip = [this](UINT_PTR id, RECT rect, wchar_t* text) {
         TOOLINFOW info{};
@@ -786,10 +857,11 @@ void MainWindow::create_tooltips() noexcept {
     add_tooltip(3, to_rect(layout.clear_all_button), const_cast<wchar_t*>(L"清空历史"));
     add_tooltip(4, to_rect(layout.back_button), const_cast<wchar_t*>(L"返回主界面"));
     add_tooltip(5, to_rect(layout.trigger_mode_card), const_cast<wchar_t*>(L"切换按住或切换录音"));
-    const RECT record_rect{static_cast<LONG>(layout.record_button.point.x - layout.record_button.radiusX),
-                           static_cast<LONG>(layout.record_button.point.y - layout.record_button.radiusY),
-                           static_cast<LONG>(layout.record_button.point.x + layout.record_button.radiusX),
-                           static_cast<LONG>(layout.record_button.point.y + layout.record_button.radiusY)};
+    const RECT record_rect{
+        static_cast<LONG>(std::lround((layout.record_button.point.x - layout.record_button.radiusX) * scale)),
+        static_cast<LONG>(std::lround((layout.record_button.point.y - layout.record_button.radiusY) * scale)),
+        static_cast<LONG>(std::lround((layout.record_button.point.x + layout.record_button.radiusX) * scale)),
+        static_cast<LONG>(std::lround((layout.record_button.point.y + layout.record_button.radiusY) * scale))};
     add_tooltip(6, record_rect, const_cast<wchar_t*>(L"按住 Right Ctrl 说话"));
 }
 

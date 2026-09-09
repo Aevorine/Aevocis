@@ -84,6 +84,12 @@ private:
     void tick_animation() noexcept;
     [[nodiscard]] std::vector<FocusRegion> build_focus_regions();
     void handle_key_down(WPARAM virtual_key) noexcept;
+    // Ratio of this window's actual monitor DPI to the 96-DPI baseline every layout constant
+    // in compute_layout()/render_content() is authored against. 1.0 on a 100%-scale display;
+    // e.g. 1.5 at 150% scale. Used to size the physical window/swap chain and to scale native
+    // child controls (the search edit box, tooltips) and mouse hit-testing, which Direct2D's
+    // own transform doesn't cover.
+    [[nodiscard]] float dpi_scale() const noexcept { return static_cast<float>(dpi_) / 96.0F; }
 
     HINSTANCE instance_{};
     HWND hwnd_{};
@@ -111,6 +117,7 @@ private:
     HBRUSH search_bk_brush_{};
     HFONT search_font_{};
 
+    UINT dpi_{96};
     platform::windows::CompositionSurface surface_;
     bool composition_ready_{false};
     Microsoft::WRL::ComPtr<ID2D1Factory> fallback_factory_;

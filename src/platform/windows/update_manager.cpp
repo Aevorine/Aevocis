@@ -4,14 +4,17 @@
 #include "aevocis/platform/windows/storage.hpp"
 
 #include <bcrypt.h>
+#include <commctrl.h>
 #include <shellapi.h>
 #include <winhttp.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -209,6 +212,102 @@ struct UpdateAsset {
     return result;
 }
 
+// Small modeless dialog shown while the update installer downloads, so the user sees real
+// bytes-downloaded/total and a percentage instead of the UI just sitting there for however
+// long the download takes. Lives entirely on the caller's own background thread
+// (check_and_install runs off UpdateManager::check_and_install_async's std::thread, not the UI
+// thread), so every Win32 call here is same-thread -- no cross-thread message marshaling -- but
+// that also means this thread never reaches a normal GetMessage loop, so pump() has to drain
+// this window's queued messages by hand after each state change or it would never repaint past
+// the first frame.
+class ProgressWindow {
+public:
+    bool create(HWND owner, std::wstring_view title) noexcept {
+        INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_PROGRESS_CLASS};
+        (void)InitCommonControlsEx(&controls);
+        WNDCLASSW window_class{};
+        window_class.lpfnWndProc = DefWindowProcW;
+        window_class.hInstance = GetModuleHandleW(nullptr);
+        window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        window_class.lpszClassName = kClassName;
+        (void)RegisterClassW(&window_class);
+        constexpr int width = 360;
+        constexpr int height = 118;
+        RECT owner_rect{0, 0, width, height};
+        if (owner == nullptr || GetWindowRect(owner, &owner_rect) == FALSE) {
+            owner_rect = RECT{0, 0, width, height};
+        }
+        const int x = owner_rect.left + ((owner_rect.right - owner_rect.left) - width) / 2;
+        const int y = owner_rect.top + ((owner_rect.bottom - owner_rect.top) - height) / 2;
+        window_ = CreateWindowExW(WS_EX_DLGMODALFRAME, kClassName, title.data(), WS_POPUP | WS_CAPTION | WS_VISIBLE, x, y,
+                                  width, height, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (window_ == nullptr) {
+            return false;
+        }
+        label_ = CreateWindowExW(0, L"STATIC", L"正在连接更新服务器…", WS_CHILD | WS_VISIBLE, 16, 16, width - 48, 20,
+                                 window_, nullptr, GetModuleHandleW(nullptr), nullptr);
+        bar_ = CreateWindowExW(0, PROGRESS_CLASSW, nullptr, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 16, 48, width - 48, 20,
+                               window_, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (bar_ != nullptr) {
+            (void)SendMessageW(bar_, PBM_SETRANGE32, 0, 100);
+        }
+        ShowWindow(window_, SW_SHOW);
+        (void)UpdateWindow(window_);
+        pump();
+        return true;
+    }
+
+    void update(unsigned long long downloaded, unsigned long long total) noexcept {
+        if (window_ == nullptr) {
+            return;
+        }
+        wchar_t text[160]{};
+        const double downloaded_mb = static_cast<double>(downloaded) / (1024.0 * 1024.0);
+        if (total > 0) {
+            const double total_mb = static_cast<double>(total) / (1024.0 * 1024.0);
+            const int percent = static_cast<int>((downloaded * 100ULL) / total);
+            (void)swprintf(text, ARRAYSIZE(text), L"已下载 %.1f MB / %.1f MB (%d%%)", downloaded_mb, total_mb, percent);
+            if (bar_ != nullptr) {
+                (void)SendMessageW(bar_, PBM_SETPOS, static_cast<WPARAM>(percent), 0);
+            }
+        } else {
+            (void)swprintf(text, ARRAYSIZE(text), L"已下载 %.1f MB", downloaded_mb);
+        }
+        if (label_ != nullptr) {
+            SetWindowTextW(label_, text);
+        }
+        pump();
+    }
+
+    void destroy() noexcept {
+        if (window_ != nullptr) {
+            DestroyWindow(window_);
+            window_ = nullptr;
+            label_ = nullptr;
+            bar_ = nullptr;
+        }
+    }
+
+    ~ProgressWindow() { destroy(); }
+
+private:
+    void pump() noexcept {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != FALSE) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+
+    static constexpr wchar_t kClassName[] = L"AevocisUpdateProgress";
+    HWND window_{};
+    HWND label_{};
+    HWND bar_{};
+};
+
+using DownloadProgressCallback = std::function<void(unsigned long long downloaded, unsigned long long total)>;
+
 // GitHub's release asset URLs (github.com/.../releases/download/...) 302-redirect to a
 // signed, time-limited objects.githubusercontent.com URL. WinHTTP follows same-scheme redirects
 // automatically by default, but the previous version of this function never checked the response
@@ -217,7 +316,8 @@ struct UpdateAsset {
 // silently wrote THAT body to disk and let the caller's sha256 check fail with "校验失败", which is
 // exactly the symptom this fixes. WinHttpCrackUrl + an explicit bounded redirect loop makes each
 // hop and its status code visible and handled on its own terms instead of assumed.
-[[nodiscard]] bool download_asset(std::string_view initial_url, const std::filesystem::path& destination) noexcept {
+[[nodiscard]] bool download_asset(std::string_view initial_url, const std::filesystem::path& destination,
+                                  const DownloadProgressCallback& on_progress) noexcept {
     constexpr std::string_view trusted_prefix = "https://github.com/Aevorine/Aevocis";
     if (initial_url.rfind(trusted_prefix, 0) != 0) {
         return false;
@@ -277,6 +377,16 @@ struct UpdateAsset {
             WinHttpCloseHandle(session);
             return false;
         }
+        unsigned long long total_bytes = 0;
+        {
+            DWORD content_length = 0;
+            DWORD content_length_size = sizeof(content_length);
+            if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                                    WINHTTP_HEADER_NAME_BY_INDEX, &content_length, &content_length_size,
+                                    WINHTTP_NO_HEADER_INDEX) != FALSE) {
+                total_bytes = content_length;
+            }
+        }
         const auto temporary = destination.parent_path() / (destination.filename().wstring() + L".download");
         std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
         if (!stream) {
@@ -286,6 +396,8 @@ struct UpdateAsset {
             return false;
         }
         bool success = true;
+        unsigned long long downloaded_bytes = 0;
+        if (on_progress) on_progress(0, total_bytes);
         for (;;) {
             DWORD available = 0;
             if (WinHttpQueryDataAvailable(request, &available) == FALSE || available == 0) break;
@@ -300,6 +412,8 @@ struct UpdateAsset {
                 success = false;
                 break;
             }
+            downloaded_bytes += read;
+            if (on_progress) on_progress(downloaded_bytes, total_bytes);
         }
         stream.close();
         WinHttpCloseHandle(request);
@@ -365,7 +479,12 @@ void UpdateManager::check_and_install(HWND owner, const std::wstring& current_ve
     std::error_code error;
     std::filesystem::create_directories(update_directory, error);
     const auto installer = update_directory / L"Aevocis-Setup.exe";
-    if (!download_asset(asset.url, installer) || sha256_file(installer) != asset.digest.substr(7)) {
+    ProgressWindow progress;
+    (void)progress.create(owner, L"Aevocis 更新");
+    const bool downloaded = download_asset(
+        asset.url, installer, [&progress](unsigned long long done, unsigned long long total) { progress.update(done, total); });
+    progress.destroy();
+    if (!downloaded || sha256_file(installer) != asset.digest.substr(7)) {
         (void)DeleteFileW(installer.c_str());
         MessageBoxW(owner, L"安装包下载或校验失败。", L"Aevocis", MB_OK | MB_ICONERROR);
         return;
