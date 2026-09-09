@@ -4,7 +4,7 @@
 
 namespace aevocis {
 
-inline constexpr std::wstring_view kVersion = L"0.4.2";
-inline constexpr std::string_view kReleaseTag = "native-cpp-v0.4.2";
+inline constexpr std::wstring_view kVersion = L"0.4.3";
+inline constexpr std::string_view kReleaseTag = "native-cpp-v0.4.3";
 
 }  // namespace aevocis
