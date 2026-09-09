@@ -301,6 +301,18 @@ private:
         return false;
     }
 
+    // True if any modifier other than the push-to-talk key itself is currently down.
+    // Used to reject a push-to-talk trigger that arrives as part of a chord (Ctrl+Alt,
+    // Ctrl+Shift, AltGr's synthetic Ctrl+Alt, etc.) so only a standalone right-Ctrl press
+    // ever starts recording.
+    [[nodiscard]] static bool is_other_modifier_held() noexcept {
+        return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 || (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0 ||
+               (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0 || (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
+               (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0 || (GetAsyncKeyState(VK_RSHIFT) & 0x8000) != 0 ||
+               (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0 ||
+               (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0;
+    }
+
     void handle_keyboard(UINT virtual_key, bool down) {
         if (virtual_key != settings_.push_to_talk_virtual_key) {
             return;
@@ -320,6 +332,14 @@ private:
                 return;
             }
             if (!toggle_mode_.load() && scheduler_.active()) {
+                return;
+            }
+            // Only a bare push-to-talk key press (right Ctrl alone) may start a new
+            // recording. Windows synthesizes a Ctrl-down event as part of AltGr (and any
+            // other Ctrl+<modifier> chord also reports this same vkCode on down), so without
+            // this guard holding Alt/Shift/Win/left-Ctrl together with right Ctrl -- or an
+            // AltGr press on non-US keyboard layouts -- would incorrectly start recording.
+            if (is_other_modifier_held()) {
                 return;
             }
             const TargetWindowToken target = TargetWindowToken::capture();
