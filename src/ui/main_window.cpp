@@ -49,6 +49,7 @@ struct Layout {
     D2D1_RECT_F clear_all_button;
     D2D1_RECT_F back_button;
     D2D1_RECT_F trigger_mode_card;
+    D2D1_RECT_F push_to_talk_card;
     D2D1_RECT_F appearance_card;
     D2D1_RECT_F stats_card;
 };
@@ -67,8 +68,11 @@ struct Layout {
     layout.clear_all_button = D2D1::RectF(w - 96.0F, h - 46.0F, w - 20.0F, h - 16.0F);
     layout.back_button = D2D1::RectF(16.0F, 12.0F, 92.0F, 52.0F);
     layout.trigger_mode_card = D2D1::RectF(20.0F, 70.0F, w - 20.0F, 150.0F);
-    layout.appearance_card = D2D1::RectF(20.0F, 166.0F, w - 20.0F, 246.0F);
-    layout.stats_card = D2D1::RectF(20.0F, 262.0F, w - 20.0F, 384.0F);
+    // Inserted below trigger_mode_card; appearance_card/stats_card shifted down by the same
+    // 96px (card height + gap) this card occupies so nothing overlaps.
+    layout.push_to_talk_card = D2D1::RectF(20.0F, 166.0F, w - 20.0F, 246.0F);
+    layout.appearance_card = D2D1::RectF(20.0F, 262.0F, w - 20.0F, 342.0F);
+    layout.stats_card = D2D1::RectF(20.0F, 358.0F, w - 20.0F, 480.0F);
     return layout;
 }
 
@@ -244,6 +248,19 @@ void MainWindow::set_history_clear_handler(Action handler) { history_clear_handl
 void MainWindow::set_theme_handler(Action handler) { theme_handler_ = std::move(handler); }
 
 void MainWindow::set_first_paint_handler(Action handler) { first_paint_handler_ = std::move(handler); }
+
+void MainWindow::set_push_to_talk_handler(Action handler) { push_to_talk_handler_ = std::move(handler); }
+
+void MainWindow::set_push_to_talk_label(std::wstring label) noexcept {
+    push_to_talk_label_ = std::move(label);
+    update_dynamic_tooltips();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void MainWindow::set_push_to_talk_capturing(bool capturing) noexcept {
+    push_to_talk_capturing_ = capturing;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
 
 void MainWindow::set_theme(ThemeMode theme) noexcept {
     theme_ = theme;
@@ -582,6 +599,9 @@ std::vector<MainWindow::FocusRegion> MainWindow::build_focus_regions() {
                                 if (trigger_mode_handler_) trigger_mode_handler_();
                                 InvalidateRect(hwnd_, nullptr, FALSE);
                             }});
+        regions.push_back({to_rect(layout.push_to_talk_card), [this] {
+                                if (push_to_talk_handler_) push_to_talk_handler_();
+                            }});
         return regions;
     }
     regions.push_back({to_rect(layout.theme_button), [this] { toggle_theme(); }});
@@ -728,9 +748,24 @@ void MainWindow::render_content(ID2D1RenderTarget* target) noexcept {
         fill_rounded(layout.trigger_mode_card, palette.panel, 16.0F);
         draw_text(target, write_factory_.Get(), L"触发方式", D2D1::RectF(layout.trigger_mode_card.left + 18, layout.trigger_mode_card.top + 14, layout.trigger_mode_card.right - 16, layout.trigger_mode_card.top + 40),
                  12.0F, D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING);
-        draw_text(target, write_factory_.Get(), toggle_mode_ ? L"切换模式 · 点按开始/停止" : L"按住模式 · 按住 Right Ctrl 说话",
+        draw_text(target, write_factory_.Get(),
+                 toggle_mode_ ? L"切换模式 · 点按开始/停止" : (L"按住模式 · 按住 " + push_to_talk_label_ + L" 说话"),
                  D2D1::RectF(layout.trigger_mode_card.left + 18, layout.trigger_mode_card.top + 42, layout.trigger_mode_card.right - 16, layout.trigger_mode_card.top + 74),
                  15.0F, D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING);
+
+        fill_rounded(layout.push_to_talk_card, palette.panel, 16.0F);
+        draw_text(target, write_factory_.Get(), L"语音识别快捷键",
+                 D2D1::RectF(layout.push_to_talk_card.left + 18, layout.push_to_talk_card.top + 14, layout.push_to_talk_card.right - 16, layout.push_to_talk_card.top + 40),
+                 12.0F, D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING);
+        if (push_to_talk_capturing_) {
+            draw_text(target, write_factory_.Get(), L"请按下新的按键…（Esc 取消）",
+                     D2D1::RectF(layout.push_to_talk_card.left + 18, layout.push_to_talk_card.top + 42, layout.push_to_talk_card.right - 16, layout.push_to_talk_card.top + 74),
+                     15.0F, D2D1::ColorF(palette.accent.r, palette.accent.g, palette.accent.b, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING);
+        } else {
+            draw_text(target, write_factory_.Get(), push_to_talk_label_ + L" · 点击此处更改",
+                     D2D1::RectF(layout.push_to_talk_card.left + 18, layout.push_to_talk_card.top + 42, layout.push_to_talk_card.right - 16, layout.push_to_talk_card.top + 74),
+                     15.0F, D2D1::ColorF(palette.ink.r, palette.ink.g, palette.ink.b, alpha), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING);
+        }
 
         fill_rounded(layout.appearance_card, palette.panel, 16.0F);
         draw_text(target, write_factory_.Get(), L"外观", D2D1::RectF(layout.appearance_card.left + 18, layout.appearance_card.top + 14, layout.appearance_card.right - 16, layout.appearance_card.top + 40),
@@ -803,7 +838,7 @@ void MainWindow::render_content(ID2D1RenderTarget* target) noexcept {
             target->FillEllipse(layout.record_button, brush.Get());
         }
 
-        draw_text(target, write_factory_.Get(), L"按住 Right Ctrl 说话，松开自动输入到当前窗口", layout.hint_text, 11.5F,
+        draw_text(target, write_factory_.Get(), L"按住 " + push_to_talk_label_ + L" 说话，松开自动输入到当前窗口", layout.hint_text, 11.5F,
                  D2D1::ColorF(palette.muted.r, palette.muted.g, palette.muted.b, alpha), DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING);
         draw_text(target, write_factory_.Get(), L"清空", layout.clear_all_button, 13.0F,
@@ -862,7 +897,25 @@ void MainWindow::create_tooltips() noexcept {
         static_cast<LONG>(std::lround((layout.record_button.point.y - layout.record_button.radiusY) * scale)),
         static_cast<LONG>(std::lround((layout.record_button.point.x + layout.record_button.radiusX) * scale)),
         static_cast<LONG>(std::lround((layout.record_button.point.y + layout.record_button.radiusY) * scale))};
-    add_tooltip(6, record_rect, const_cast<wchar_t*>(L"按住 Right Ctrl 说话"));
+    // Text embeds the current push_to_talk_label_ (already set by Application before create()
+    // runs, so this reflects a previously-saved rebind, not always the "Right Ctrl" default) --
+    // kept in sync afterward by update_dynamic_tooltips() whenever the key is rebound live.
+    const std::wstring record_tip = L"按住 " + push_to_talk_label_ + L" 说话";
+    add_tooltip(6, record_rect, const_cast<wchar_t*>(record_tip.c_str()));
+    add_tooltip(7, to_rect(layout.push_to_talk_card), const_cast<wchar_t*>(L"点击设置语音识别快捷键"));
+}
+
+void MainWindow::update_dynamic_tooltips() noexcept {
+    if (tooltip_ == nullptr) {
+        return;
+    }
+    const std::wstring record_text = L"按住 " + push_to_talk_label_ + L" 说话";
+    TOOLINFOW info{};
+    info.cbSize = sizeof(info);
+    info.hwnd = hwnd_;
+    info.uId = 6;
+    info.lpszText = const_cast<wchar_t*>(record_text.c_str());
+    (void)SendMessageW(tooltip_, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&info));
 }
 
 }  // namespace aevocis::ui

@@ -93,6 +93,73 @@ constexpr ULONGLONG kIdleUnloadThresholdMs = 10ULL * 60ULL * 1000ULL;
     return result;
 }
 
+// Left-side Ctrl/Alt/Shift/Win are excluded from the rebindable push-to-talk key pool. The
+// right-side counterparts (VK_RCONTROL, the shipped default, plus VK_RMENU/VK_RSHIFT/VK_RWIN)
+// stay eligible because ordinary Windows/app shortcuts almost universally use the left-side key
+// (Ctrl+C, Alt+Tab, Shift+Click, Win+D, ...) -- binding push-to-talk to a left-side modifier
+// would start a spurious recording on the mere key-down of every such chord, before the second
+// key even lands, even though the chord's own effect (copy/paste/switch/etc.) still fires
+// normally, since this hook never consumes events (CallNextHookEx always runs). Right-side
+// modifiers are idle during those same chords for the vast majority of keyboard layouts, which
+// is exactly why VK_RCONTROL was chosen as the original hardcoded default.
+[[nodiscard]] bool is_key_reserved_for_shortcuts(UINT virtual_key) noexcept {
+    switch (virtual_key) {
+    case VK_LCONTROL:
+    case VK_LMENU:
+    case VK_LSHIFT:
+    case VK_LWIN:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Human-readable label for a push-to-talk key, shown in Settings and the main-page hint.
+// Left/right modifier variants get a fixed English label (WH_KEYBOARD_LL always reports the
+// specific L/R vkCode for these, so the switch is exhaustive for the cases that matter) so the
+// default reads exactly "Right Ctrl", matching this app's existing hardcoded UI text, regardless
+// of OS locale. Anything else falls back to GetKeyNameTextW against the key's real scan code,
+// which returns the OS's own localized name (e.g. "F13", "Page Up", "A").
+[[nodiscard]] std::wstring key_display_name(UINT virtual_key) {
+    switch (virtual_key) {
+    case VK_RCONTROL: return L"Right Ctrl";
+    case VK_LCONTROL: return L"Left Ctrl";
+    case VK_RMENU: return L"Right Alt";
+    case VK_LMENU: return L"Left Alt";
+    case VK_RSHIFT: return L"Right Shift";
+    case VK_LSHIFT: return L"Left Shift";
+    case VK_RWIN: return L"Right Win";
+    case VK_LWIN: return L"Left Win";
+    case VK_CAPITAL: return L"Caps Lock";
+    case VK_SPACE: return L"Space";
+    case VK_TAB: return L"Tab";
+    default:
+        break;
+    }
+    const UINT scan_code = MapVirtualKeyW(virtual_key, MAPVK_VK_TO_VSC);
+    if (scan_code != 0) {
+        LONG lparam = static_cast<LONG>(scan_code) << 16;
+        switch (virtual_key) {
+        case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+        case VK_PRIOR: case VK_NEXT: case VK_LEFT: case VK_RIGHT:
+        case VK_UP: case VK_DOWN: case VK_NUMLOCK: case VK_DIVIDE:
+        case VK_APPS:
+            lparam |= (1L << 24);
+            break;
+        default:
+            break;
+        }
+        wchar_t buffer[64]{};
+        const int length = GetKeyNameTextW(lparam, buffer, ARRAYSIZE(buffer));
+        if (length > 0) {
+            return std::wstring(buffer, static_cast<std::size_t>(length));
+        }
+    }
+    wchar_t fallback[24]{};
+    swprintf_s(fallback, L"Key 0x%02X", virtual_key);
+    return fallback;
+}
+
 class Application {
 public:
     explicit Application(HINSTANCE instance, ULONGLONG process_start_tick)
@@ -113,6 +180,9 @@ public:
     int run() {
         icon_ = load_icon();
         window_.set_icon(icon_);
+        // Must land before create() -- MainWindow::create_tooltips() (called from inside
+        // create()) reads push_to_talk_label_ to seed the record-button tooltip's initial text.
+        window_.set_push_to_talk_label(key_display_name(settings_.push_to_talk_virtual_key));
         if (!instance_guard_.primary() || !window_.create()) {
             return 0;
         }
@@ -142,6 +212,12 @@ public:
             if (history_store_.clear()) {
                 window_.clear_history();
             }
+        });
+        // Arms capture mode; the very next accepted key-down the global keyboard hook reports
+        // (handled at the top of handle_keyboard) rebinds push_to_talk_virtual_key and saves it.
+        window_.set_push_to_talk_handler([this] {
+            capturing_hotkey_ = true;
+            window_.set_push_to_talk_capturing(true);
         });
         window_.set_theme(settings_.theme == 1 ? ui::ThemeMode::DarkGlass : ui::ThemeMode::Paper);
         window_.set_trigger_mode(settings_.toggle_mode);
@@ -319,6 +395,33 @@ private:
     }
 
     void handle_keyboard(UINT virtual_key, bool down) {
+        if (capturing_hotkey_) {
+            // Swallow releases entirely -- only a fresh key-down can bind or cancel, and the
+            // normal push-to-talk/other_keys_down_ bookkeeping below must not see any of this.
+            if (!down) {
+                return;
+            }
+            if (virtual_key == VK_ESCAPE) {
+                capturing_hotkey_ = false;
+                other_keys_down_.clear();
+                window_.set_push_to_talk_capturing(false);
+                return;
+            }
+            if (is_key_reserved_for_shortcuts(virtual_key)) {
+                // Stay in capture mode -- ignore this press and wait for a different key rather
+                // than binding a key that would break ordinary Ctrl/Alt/Shift/Win chords.
+                return;
+            }
+            settings_.push_to_talk_virtual_key = virtual_key;
+            (void)settings_store_.save(settings_);
+            capturing_hotkey_ = false;
+            // The key(s) held to reach this point (if any) were never recorded while capturing
+            // was active -- clear defensively so a stale entry can't wedge the new binding off.
+            other_keys_down_.clear();
+            window_.set_push_to_talk_capturing(false);
+            window_.set_push_to_talk_label(key_display_name(virtual_key));
+            return;
+        }
         if (virtual_key != settings_.push_to_talk_virtual_key) {
             // Track every other key's hold state so the push-to-talk key below can require a
             // chord-free press -- pressing it together with any other key must never start
@@ -815,6 +918,9 @@ private:
     // Keys currently reported down by the global keyboard hook, excluding the push-to-talk
     // key itself. Only touched on the UI thread inside handle_keyboard, so no locking needed.
     std::unordered_set<UINT> other_keys_down_;
+    // True from a push-to-talk-card click until the next accepted key-down (or Esc) resolves it.
+    // Only ever touched on the UI thread inside handle_keyboard / the click handler above.
+    bool capturing_hotkey_{false};
     core::SingleTaskScheduler scheduler_;
     WasapiRecorder recorder_;
     platform::windows::SenseVoiceRecognizer recognizer_;

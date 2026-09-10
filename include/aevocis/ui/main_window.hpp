@@ -49,6 +49,13 @@ public:
     void set_history_clear_handler(Action handler);
     void set_theme_handler(Action handler);
     void set_first_paint_handler(Action handler);
+    // Fired when the user clicks the push-to-talk card in Settings to start rebinding it.
+    void set_push_to_talk_handler(Action handler);
+    // Current push-to-talk key's display name (e.g. "Right Ctrl"), shown in Settings and in the
+    // main-page hint text. Caller keeps this in sync with AppSettings::push_to_talk_virtual_key.
+    void set_push_to_talk_label(std::wstring label) noexcept;
+    // Toggles the "press a key now" capture prompt in the Settings push-to-talk card.
+    void set_push_to_talk_capturing(bool capturing) noexcept;
     void set_theme(ThemeMode theme) noexcept;
     [[nodiscard]] ThemeMode theme() const noexcept { return theme_; }
     void set_trigger_mode(bool toggle) noexcept;
@@ -79,6 +86,7 @@ private:
     void create_search_edit() noexcept;
     void refresh_search() noexcept;
     void create_tooltips() noexcept;
+    void update_dynamic_tooltips() noexcept;
     void apply_dark_titlebar() noexcept;
     void update_search_brush() noexcept;
     void tick_animation() noexcept;
@@ -107,6 +115,9 @@ private:
     Action theme_handler_;
     Action first_paint_handler_;
     bool first_paint_fired_{false};
+    Action push_to_talk_handler_;
+    std::wstring push_to_talk_label_{L"Right Ctrl"};
+    bool push_to_talk_capturing_{false};
     std::vector<HistoryEntry> history_;
     std::vector<std::size_t> visible_history_;
     std::wstring search_query_;
