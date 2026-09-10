@@ -25,6 +25,36 @@ namespace {
     return result;
 }
 
+constexpr UINT kModifierKeys[] = {VK_MENU,  VK_LMENU,  VK_RMENU,  VK_CONTROL, VK_LCONTROL,
+                                  VK_RCONTROL, VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_LWIN, VK_RWIN};
+
+// SendInput never resets modifier state before delivering the keystrokes it's given -- if a
+// modifier neither inject() nor send_virtual_key() asked for happens to already be physically
+// held (e.g. Alt from an in-progress Alt-Tab, or the user just resting a finger on Ctrl),
+// Windows can interpret the injected keystrokes as an unintended chord: KEYEVENTF_UNICODE text
+// delivered while Alt is held can pop the target window's menu bar into focus (a real, documented
+// SendInput+KEYEVENTF_UNICODE side effect, not something either call configures on purpose), and
+// an injected VK_RETURN under a held Alt reads as Alt+Enter -- fullscreen toggle in many apps.
+// Releasing any modifier that's actually down right before injecting avoids both. Nothing needs
+// restoring afterward: the injected content (recognized speech, or an undo backspace) has no
+// relationship to whatever chord the user's physical fingers happened to be mid-pressing.
+void release_held_modifiers() noexcept {
+    std::vector<INPUT> ups;
+    ups.reserve(std::size(kModifierKeys));
+    for (const UINT vk : kModifierKeys) {
+        if ((GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0) {
+            INPUT up{};
+            up.type = INPUT_KEYBOARD;
+            up.ki.wVk = static_cast<WORD>(vk);
+            up.ki.dwFlags = KEYEVENTF_KEYUP;
+            ups.push_back(up);
+        }
+    }
+    if (!ups.empty()) {
+        (void)SendInput(static_cast<UINT>(ups.size()), ups.data(), sizeof(INPUT));
+    }
+}
+
 }  // namespace
 
 bool TextInjector::inject(const TargetWindowToken& target, std::string_view utf8) const noexcept {
@@ -35,6 +65,7 @@ bool TextInjector::inject(const TargetWindowToken& target, std::string_view utf8
     if (wide.empty() && !utf8.empty()) {
         return false;
     }
+    release_held_modifiers();
 
     constexpr std::size_t chunk_size = 128;
     for (std::size_t offset = 0; offset < wide.size(); offset += chunk_size) {
@@ -66,6 +97,7 @@ bool TextInjector::send_virtual_key(const TargetWindowToken& target, std::uint16
     if (repeat == 0 || repeat > 2000 || !target.still_valid()) {
         return false;
     }
+    release_held_modifiers();
     std::vector<INPUT> inputs;
     inputs.reserve(repeat * 2);
     for (std::size_t index = 0; index < repeat; ++index) {
