@@ -200,6 +200,10 @@ AppSettings SettingsStore::load() const {
     }
     if (json.empty()) return settings;
     settings.push_to_talk_virtual_key = json_number(json, "push_to_talk_virtual_key", settings.push_to_talk_virtual_key);
+    // Absent from settings.json files written by <= v0.4.7 -- defaults to 0, i.e. the previously
+    // implicit "the push-to-talk key triggers on its own" behaviour, so an old file keeps working.
+    settings.push_to_talk_modifiers = json_number(json, "push_to_talk_modifiers", settings.push_to_talk_modifiers) &
+                                      (MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN);
     settings.show_hide_modifiers = json_number(json, "show_hide_modifiers", settings.show_hide_modifiers);
     settings.show_hide_virtual_key = json_number(json, "show_hide_virtual_key", settings.show_hide_virtual_key);
     settings.history_retention_days = std::clamp(json_number(json, "history_retention_days", settings.history_retention_days), 1U, 3650U);
@@ -226,6 +230,7 @@ bool SettingsStore::save(const AppSettings& settings) const noexcept {
     std::ostringstream json;
     json << "{\n"
          << "  \"push_to_talk_virtual_key\": " << settings.push_to_talk_virtual_key << ",\n"
+         << "  \"push_to_talk_modifiers\": " << settings.push_to_talk_modifiers << ",\n"
          << "  \"show_hide_modifiers\": " << settings.show_hide_modifiers << ",\n"
          << "  \"show_hide_virtual_key\": " << settings.show_hide_virtual_key << ",\n"
          << "  \"toggle_mode\": " << (settings.toggle_mode ? "true" : "false") << ",\n"

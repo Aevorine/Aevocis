@@ -22,10 +22,31 @@
 
 ### 自定义语音识别快捷键
 
-打开设置面板，点击"语音识别快捷键"卡片，按下新按键即可绑定（按 Esc 取消）。为避免影响
-Ctrl+C / Alt+Tab / Shift+方向键 / Win+ 等系统与应用组合键的正常使用，左侧的 Ctrl / Alt /
-Shift / Win 键不能被绑定为语音识别快捷键；右侧的 Right Ctrl / Right Alt / Right Shift /
-Right Win，以及字母、数字、功能键、CapsLock 等其他按键均可自由绑定。
+打开设置面板，点击“语音识别快捷键”卡片，然后：
+
+- 想用**单个按键**：直接按下并松开该键（默认的 Right Ctrl 就是这样绑定的）。
+- 想用**组合键**：按住 Ctrl / Alt / Shift / Win 中的一个或多个，再按下主键（例如 Ctrl + Alt + Space）。
+- 按 Esc 取消；点击卡片右上角“重置默认”可随时回到 Right Ctrl。
+
+绑定立即生效，无需重启，并保存在 `%LOCALAPPDATA%\Aevocis\settings.json` 的
+`push_to_talk_virtual_key` / `push_to_talk_modifiers` 两个字段中。
+
+**不会影响其他快捷键。** 键盘钩子只读取按键、从不拦截，所以被绑定的键在其他软件里照常工作；
+反过来，为了避免别的快捷键顺带触发录音，以下绑定会被拒绝并在卡片上说明原因：
+
+| 被拒绝的绑定 | 原因 |
+| --- | --- |
+| 左侧 Ctrl / Alt / Shift / Win 单键 | 它们承载了绝大多数系统与应用组合键 |
+| 字母、数字、空格、回车、方向键等单键 | 打字时会被频繁按到 |
+| Win + 单键 | 几乎都被 Windows 系统占用 |
+| Ctrl+C/V/X/Z/S…、Alt+Tab、Alt+F4 等 | 通用系统快捷键 |
+| Ctrl+Alt+H、Ctrl+Alt+Z、Ctrl+Shift+P | 已被本软件的显示/隐藏、撤销、命令面板占用 |
+
+右侧的 Right Ctrl / Right Alt / Right Shift / Right Win、F1–F24、CapsLock 等单键，以及任意
+带修饰键的组合键都可以自由绑定。
+
+录音只在**仅按下该快捷键本身**时触发：如果同时按住了绑定之外的任何按键，或者多按了绑定之外的
+修饰键，都不会开始录音，因此不会打断任何组合键操作。
 
 ## 语音命令
 

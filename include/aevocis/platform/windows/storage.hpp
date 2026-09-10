@@ -14,6 +14,12 @@ namespace aevocis::platform::windows {
 
 struct AppSettings {
     std::uint32_t push_to_talk_virtual_key{VK_RCONTROL};
+    // Side-agnostic modifier flags (MOD_CONTROL/MOD_ALT/MOD_SHIFT/MOD_WIN) that must be held
+    // together with push_to_talk_virtual_key for it to start a recording. 0 -- the shipped
+    // default, paired with VK_RCONTROL -- means the key triggers on its own. Deliberately the
+    // same bit values RegisterHotKey uses so a push-to-talk binding can be compared directly
+    // against the app's own RegisterHotKey shortcuts when checking for collisions.
+    std::uint32_t push_to_talk_modifiers{0};
     std::uint32_t show_hide_modifiers{MOD_CONTROL | MOD_ALT};
     std::uint32_t show_hide_virtual_key{'H'};
     bool toggle_mode{false};
